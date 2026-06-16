@@ -35,9 +35,10 @@ const zoneFromHash = (hash: string): Zone => (parseInt(hash.slice(0, 2), 16) % 3
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
-  const [serverSeed, setServerSeed] = useState("");
   const [serverHash, setServerHash] = useState("");
   const [clientSeed, setClientSeed] = useState("");
+  const [sessionToken, setSessionToken] = useState("");
+  const [revealedServerSeed, setRevealedServerSeed] = useState("");
   const [yourTeam, setYourTeam] = useState<Team>(TEAMS[0]);
   const [oppTeam, setOppTeam] = useState<Team>(TEAMS[1]);
   const [teamsList, setTeamsList] = useState<Team[]>(TEAMS);
@@ -96,31 +97,80 @@ export default function Home() {
   // Safe client mounting
   useEffect(() => {
     setMounted(true);
-    const ss = randHex(16);
-    setServerSeed(ss);
     setClientSeed("degen-" + randHex(3));
-    sha256Hex(ss).then(setServerHash);
     fetchLiveOdds();
   }, []);
 
-  function startGame() {
+  // Reveal server seed automatically when game is finished
+  useEffect(() => {
+    if (gameState.phase === "done" && sessionToken) {
+      const revealSeed = async () => {
+        try {
+          const res = await fetch("/api/game/reveal", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionToken }),
+          });
+          const data = await res.json();
+          if (data.success) {
+            setRevealedServerSeed(data.serverSeed);
+          }
+        } catch (err) {
+          console.error("Error revealing server seed:", err);
+        }
+      };
+      revealSeed();
+    }
+  }, [gameState.phase, sessionToken]);
+
+  async function startGame() {
     if (!yourTeam || !oppTeam || yourTeam.code === oppTeam.code) return;
     updateState((s) => {
-      s.phase = "shoot";
-      s.round = 1;
-      s.turn = "you";
-      s.ys = 0;
-      s.os = 0;
-      s.yk = [];
-      s.ok = [];
-      s.scene = { ballFly: false };
-      s.kickIndex = s.kickIndex + 1;
-      s.winner = null;
-      s.busy = false;
+      s.busy = true;
     });
+    try {
+      const res = await fetch("/api/game/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          yourTeam: yourTeam.code,
+          oppTeam: oppTeam.code,
+          clientSeed,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setServerHash(data.serverHash);
+        setSessionToken(data.sessionToken);
+        setRevealedServerSeed("");
+        updateState((s) => {
+          s.phase = data.gameState.phase;
+          s.round = data.gameState.round;
+          s.turn = data.gameState.turn;
+          s.ys = data.gameState.ys;
+          s.os = data.gameState.os;
+          s.yk = [...data.gameState.yk];
+          s.ok = [...data.gameState.ok];
+          s.scene = { ballFly: false };
+          s.kickIndex = data.gameState.kickIndex;
+          s.winner = data.gameState.winner;
+          s.nonce = data.gameState.nonce;
+          s.lastHash = data.gameState.lastHash;
+          s.busy = false;
+        });
+      }
+    } catch (err) {
+      console.error("Error starting game:", err);
+      updateState((s) => {
+        s.busy = false;
+      });
+    }
   }
 
   function toSelect() {
+    setSessionToken("");
+    setRevealedServerSeed("");
+    setServerHash("");
     updateState((s) => {
       s.phase = "select";
       s.round = 1;
@@ -132,6 +182,8 @@ export default function Home() {
       s.scene = { ballFly: false };
       s.winner = null;
       s.busy = false;
+      s.nonce = 0;
+      s.lastHash = "";
     });
   }
 
@@ -145,11 +197,15 @@ export default function Home() {
     shotZone,
     keeperZone,
     result,
+    nextGameState,
+    nextSessionToken,
   }: {
     actor: "you" | "opp";
     shotZone: Zone;
     keeperZone: Zone;
     result: KickResult;
+    nextGameState: GameState;
+    nextSessionToken: string;
   }) {
     updateState((s) => {
       s.phase = "anim";
@@ -172,68 +228,27 @@ export default function Home() {
     setTimeout(() => {
       updateState((s) => {
         s.scene.showResult = true;
-        if (actor === "you") {
-          s.yk.push(result);
-          if (result === "GOAL") s.ys++;
-        } else {
-          s.ok.push(result);
-          if (result === "GOAL") s.os++;
-        }
+        s.ys = nextGameState.ys;
+        s.os = nextGameState.os;
+        s.yk = [...nextGameState.yk];
+        s.ok = [...nextGameState.ok];
       });
     }, 480);
 
-    setTimeout(() => advance(actor), 1140);
-  }
-
-  function advance(actor: "you" | "opp") {
-    updateState((s) => {
-      s.busy = false;
-      if (actor === "you") {
-        s.turn = "opp";
-        s.phase = "dive";
-        s.kickIndex++;
+    setTimeout(() => {
+      updateState((s) => {
+        s.phase = nextGameState.phase;
+        s.turn = nextGameState.turn;
+        s.round = nextGameState.round;
+        s.kickIndex = nextGameState.kickIndex;
+        s.winner = nextGameState.winner;
+        s.nonce = nextGameState.nonce;
+        s.lastHash = nextGameState.lastHash;
+        s.busy = false;
         s.scene = { ballFly: false };
-        return;
-      }
-
-      const r = s.round;
-      const diff = Math.abs(s.ys - s.os);
-
-      if (r <= 5) {
-        const remaining = 5 - r;
-        if (diff > remaining) {
-          s.phase = "done";
-          s.winner = s.ys > s.os ? "you" : "opp";
-          return;
-        }
-        if (r === 5) {
-          s.round = 6;
-          s.turn = "you";
-          s.phase = "shoot";
-          s.kickIndex++;
-          s.scene = { ballFly: false };
-          return;
-        }
-        s.round = r + 1;
-        s.turn = "you";
-        s.phase = "shoot";
-        s.kickIndex++;
-        s.scene = { ballFly: false };
-        return;
-      }
-
-      if (s.ys !== s.os) {
-        s.phase = "done";
-        s.winner = s.ys > s.os ? "you" : "opp";
-        return;
-      }
-
-      s.round = r + 1;
-      s.turn = "you";
-      s.phase = "shoot";
-      s.kickIndex++;
-      s.scene = { ballFly: false };
-    });
+      });
+      setSessionToken(nextSessionToken);
+    }, 1140);
   }
 
   async function onShoot(zone: Zone) {
@@ -241,17 +256,38 @@ export default function Home() {
     updateState((s) => {
       s.busy = true;
     });
-    const n = gameState.nonce + 1;
-    updateState((s) => {
-      s.nonce = n;
-    });
-    const hash = await sha256Hex(`${serverSeed}:${clientSeed}:${n}`);
-    updateState((s) => {
-      s.lastHash = hash;
-    });
-    const keeperZone = zoneFromHash(hash);
-    const { result } = outcome(yourTeam, oppTeam, zone, keeperZone, hash);
-    playKick({ actor: "you", shotZone: zone, keeperZone, result });
+    try {
+      const res = await fetch("/api/game/shoot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionToken,
+          clientSeed,
+          zone,
+          action: "shoot",
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        playKick({
+          actor: "you",
+          shotZone: zone,
+          keeperZone: data.opponentZone,
+          result: data.result,
+          nextGameState: data.gameState,
+          nextSessionToken: data.sessionToken,
+        });
+      } else {
+        updateState((s) => {
+          s.busy = false;
+        });
+      }
+    } catch (err) {
+      console.error("Error in onShoot:", err);
+      updateState((s) => {
+        s.busy = false;
+      });
+    }
   }
 
   async function onDive(zone: Zone) {
@@ -259,17 +295,38 @@ export default function Home() {
     updateState((s) => {
       s.busy = true;
     });
-    const n = gameState.nonce + 1;
-    updateState((s) => {
-      s.nonce = n;
-    });
-    const hash = await sha256Hex(`${serverSeed}:${clientSeed}:${n}`);
-    updateState((s) => {
-      s.lastHash = hash;
-    });
-    const shotZone = zoneFromHash(hash);
-    const { result } = outcome(oppTeam, yourTeam, shotZone, zone, hash);
-    playKick({ actor: "opp", shotZone, keeperZone: zone, result });
+    try {
+      const res = await fetch("/api/game/shoot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionToken,
+          clientSeed,
+          zone,
+          action: "dive",
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        playKick({
+          actor: "opp",
+          shotZone: data.opponentZone,
+          keeperZone: zone,
+          result: data.result,
+          nextGameState: data.gameState,
+          nextSessionToken: data.sessionToken,
+        });
+      } else {
+        updateState((s) => {
+          s.busy = false;
+        });
+      }
+    } catch (err) {
+      console.error("Error in onDive:", err);
+      updateState((s) => {
+        s.busy = false;
+      });
+    }
   }
 
   if (!mounted) {
@@ -418,6 +475,7 @@ export default function Home() {
           lastHash={gameState.lastHash}
           onRandomizeClient={randomizeClient}
           disabled={gameState.phase !== "select"}
+          revealedServerSeed={revealedServerSeed}
         />
 
         <footer className="mono" style={{ fontSize: 10.5, color: "var(--dim)", marginTop: 16, lineHeight: 1.6 }}>
