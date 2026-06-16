@@ -2,7 +2,6 @@
 
 import React from "react";
 import { Team } from "@/utils/types";
-import { TEAMS } from "@/utils/constants";
 
 interface TeamSelectProps {
   yourTeam: Team;
@@ -10,6 +9,10 @@ interface TeamSelectProps {
   setYourTeam: (t: Team) => void;
   setOppTeam: (t: Team) => void;
   onStartGame: () => void;
+  teamsList: Team[];
+  loadingOdds: boolean;
+  oddsSource: "static" | "polymarket" | "simulation" | "fallback";
+  onRefreshOdds: () => void;
 }
 
 export default function TeamSelect({
@@ -18,12 +21,57 @@ export default function TeamSelect({
   setYourTeam,
   setOppTeam,
   onStartGame,
+  teamsList,
+  loadingOdds,
+  oddsSource,
+  onRefreshOdds,
 }: TeamSelectProps) {
+  let sourceLabel = "Static Snapshot";
+  let sourceColor = "var(--dim)";
+  
+  if (oddsSource === "polymarket") {
+    sourceLabel = "Polymarket Live";
+    sourceColor = "var(--green)";
+  } else if (oddsSource === "simulation") {
+    sourceLabel = "Live Odds (Simulated)";
+    sourceColor = "var(--gold)";
+  } else if (oddsSource === "fallback") {
+    sourceLabel = "Offline Snapshot (Fluctuating)";
+    sourceColor = "var(--gray)";
+  }
+
   return (
     <section className="panel" style={{ padding: 14, marginBottom: 12 }}>
-      <div className="lbl up" style={{ marginBottom: 8 }}>Your team</div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <div className="lbl up">Your team</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="mono" style={{ fontSize: 10, color: sourceColor }}>
+            ● {sourceLabel}
+          </span>
+          <button
+            className="btn"
+            onClick={onRefreshOdds}
+            disabled={loadingOdds}
+            style={{
+              padding: "4px 8px",
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            {loadingOdds ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-        {TEAMS.map((t) => {
+        {teamsList.map((t) => {
           const sel = yourTeam.code === t.code;
           return (
             <button
@@ -32,7 +80,7 @@ export default function TeamSelect({
               onClick={() => {
                 setYourTeam(t);
                 if (oppTeam.code === t.code) {
-                  const firstNotSame = TEAMS.find((x) => x.code !== t.code);
+                  const firstNotSame = teamsList.find((x) => x.code !== t.code);
                   if (firstNotSame) setOppTeam(firstNotSame);
                 }
               }}
@@ -50,7 +98,7 @@ export default function TeamSelect({
 
       <div className="lbl up" style={{ marginBottom: 8 }}>Opponent</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-        {TEAMS.map((t) => {
+        {teamsList.map((t) => {
           const sel = oppTeam.code === t.code;
           const same = yourTeam.code === t.code;
           return (
