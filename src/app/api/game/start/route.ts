@@ -4,13 +4,30 @@ import { encryptSession } from "@/utils/sessionCrypto";
 
 export async function POST(request: Request) {
   try {
-    const { yourTeam, oppTeam, clientSeed } = await request.json();
-    if (!yourTeam || !oppTeam || !clientSeed) {
+    const { yourTeam: yourTeamInput, oppTeam: oppTeamInput, clientSeed } = await request.json();
+    if (!yourTeamInput || !oppTeamInput || !clientSeed) {
       return NextResponse.json(
         { success: false, error: "Missing required parameters" },
         { status: 400 }
       );
     }
+
+    if (typeof yourTeamInput !== "object" || typeof oppTeamInput !== "object") {
+      return NextResponse.json(
+        { success: false, error: "yourTeam and oppTeam must be valid team objects" },
+        { status: 400 }
+      );
+    }
+
+    // Clamp probabilities to prevent tampering and ensure valid numbers
+    const yourTeam = {
+      ...yourTeamInput,
+      p: Math.max(0.1, Math.min(50, parseFloat(yourTeamInput.p || "0")))
+    };
+    const oppTeam = {
+      ...oppTeamInput,
+      p: Math.max(0.1, Math.min(50, parseFloat(oppTeamInput.p || "0")))
+    };
 
     // Generate random 64-char hex serverSeed (32 bytes)
     const serverSeed = crypto.randomBytes(32).toString("hex");

@@ -16,8 +16,8 @@ describe("API Routes - Game Loop & Kriptografi", () => {
     const request = new Request("http://localhost/api/game/start", {
       method: "POST",
       body: JSON.stringify({
-        yourTeam: "ESP",
-        oppTeam: "FRA",
+        yourTeam: { code: "ESP", name: "Spain", color: "#ef3340", p: 16 },
+        oppTeam: { code: "FRA", name: "France", color: "#2563eb", p: 16 },
         clientSeed,
       }),
     });
