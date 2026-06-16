@@ -1,0 +1,451 @@
+/*
+  PUMP PENALTY  ·  pixel penalty shootout wired to Polymarket odds + a provably fair seed.
+  Single React component. No dependencies beyond React. Drop it into any React app.
+
+  Quick run:
+    npm create vite@latest pump-penalty -- --template react
+    (replace the default export in src/App.jsx with this component)
+    npm install && npm run dev   then   npm run build
+
+  Live odds, on chain randomness, full references and deploy steps: see README.md next to this file.
+  Entertainment and simulation, not betting advice.
+*/
+
+import { useState, useRef, useEffect } from "react";
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+*{box-sizing:border-box;}
+.pk-root{--bg:#07090a;--panel:#0e1213;--panel2:#10171a;--line:#1d2629;--green:#00ff88;--red:#ff3b5c;--gold:#f5c518;--gray:#8a8f93;--text:#e7ecee;--dim:#6b7176;--grass:#0c2a1a;background:var(--bg);color:var(--text);font-family:'JetBrains Mono',ui-monospace,monospace;min-height:100vh;}
+.disp{font-family:'Syne',sans-serif;}
+.up{text-transform:uppercase;letter-spacing:.08em;}
+.mono{font-family:'JetBrains Mono',monospace;}
+.lbl{font-size:10px;color:var(--dim);}
+.eyebrow{font-size:11px;color:var(--dim);}
+.hr{height:1px;background:var(--line);border:0;margin:0;}
+.panel{background:var(--panel);border:1px solid var(--line);}
+.wrap{max-width:760px;margin:0 auto;padding:18px 16px 56px;}
+@keyframes pop{0%{transform:scale(.4);opacity:0}70%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+@keyframes dot{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.45);opacity:1}}
+@keyframes signal{0%{transform:scale(.5);opacity:.75}100%{transform:scale(2.4);opacity:0}}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes flow{from{background-position:0% 0}to{background-position:220% 0}}
+@keyframes launch{0%{transform:translateY(28px);opacity:0}70%{transform:translateY(-5px);opacity:1}100%{transform:translateY(0);opacity:1}}
+@keyframes netflash{0%{opacity:.55}100%{opacity:0}}
+.flow{padding:1px;background:linear-gradient(90deg,var(--green),rgba(0,255,136,0) 38%,rgba(0,255,136,0) 62%,var(--green));background-size:240% 100%;animation:flow 3s linear infinite;}
+.btn{font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.07em;font-size:12px;font-weight:700;padding:12px 14px;border-radius:0;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;transition:transform .12s ease,background .15s ease,border-color .15s ease;}
+.btn:hover:not(:disabled){transform:translateY(-1px);}
+.btn:disabled{opacity:.4;cursor:not-allowed;}
+.btn:focus-visible{outline:2px solid var(--green);outline-offset:2px;}
+.btn-green{border-color:var(--green);color:var(--green);}
+.btn-green:hover:not(:disabled){background:rgba(0,255,136,.1);}
+.btn-gold{border-color:var(--gold);color:var(--gold);}
+.btn-gold:hover:not(:disabled){background:rgba(245,197,24,.1);}
+.chip{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;padding:6px 9px;border:1px solid var(--line);background:#0a0e0f;color:var(--text);cursor:pointer;border-radius:0;transition:border-color .12s ease,background .12s ease;}
+.chip:focus-visible{outline:2px solid var(--green);outline-offset:1px;}
+.inp{font-family:'JetBrains Mono',monospace;font-size:12px;background:#0a0e0f;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:0;width:100%;}
+.inp:focus{outline:none;border-color:var(--green);}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;}}
+`;
+
+const TEAMS = [
+  { code: "ESP", name: "Spain", color: "#ef3340", p: 16 },
+  { code: "FRA", name: "France", color: "#2563eb", p: 16 },
+  { code: "POR", name: "Portugal", color: "#16a34a", p: 11 },
+  { code: "ENG", name: "England", color: "#e5e7eb", p: 11 },
+  { code: "ARG", name: "Argentina", color: "#6fb7e8", p: 10 },
+  { code: "BRA", name: "Brazil", color: "#facc15", p: 9 },
+  { code: "GER", name: "Germany", color: "#9aa3ad", p: 6 },
+  { code: "NED", name: "Netherlands", color: "#fb923c", p: 4 },
+  { code: "NOR", name: "Norway", color: "#c8102e", p: 3 },
+  { code: "BEL", name: "Belgium", color: "#caa006", p: 2.5 },
+  { code: "JPN", name: "Japan", color: "#1e3a8a", p: 2 },
+  { code: "COL", name: "Colombia", color: "#fde047", p: 2 },
+  { code: "USA", name: "United States", color: "#3b5bdb", p: 1.7 },
+  { code: "MAR", name: "Morocco", color: "#047857", p: 1.6 },
+  { code: "URU", name: "Uruguay", color: "#38bdf8", p: 1.4 },
+  { code: "CRO", name: "Croatia", color: "#dc2626", p: 1.2 },
+];
+
+const SCENE_H = 244;
+const ZONES = ["Left", "Center", "Right"];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+async function sha256Hex(msg) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(msg));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+const randHex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map((b) => b.toString(16).padStart(2, "0")).join("");
+
+// outcome model: zone guess dominates, Polymarket strength nudges it
+function outcome(shooter, keeper, shotZone, keeperZone, hash) {
+  const roll = parseInt(hash.slice(2, 10), 16) / 0xffffffff;
+  const ss = shooter.p / 16, ks = keeper.p / 16;
+  if (shotZone === keeperZone) {
+    const conv = clamp(0.12 + 0.3 * ss - 0.12 * ks, 0.05, 0.5);
+    return { result: roll < conv ? "GOAL" : "SAVED", roll, conv };
+  }
+  const conv = clamp(0.8 + 0.15 * ss, 0.6, 0.97);
+  return { result: roll < conv ? "GOAL" : "MISS", roll, conv };
+}
+const zoneFromHash = (hash) => parseInt(hash.slice(0, 2), 16) % 3;
+
+/* ---------- pixel sprites ---------- */
+function PixelKit({ color, size = 22 }) {
+  return (
+    <svg width={size} height={(size * 26) / 22} viewBox="0 0 22 26" shapeRendering="crispEdges" style={{ display: "block" }}>
+      <rect x="8" y="2" width="6" height="6" fill="#f0c08a" />
+      <rect x="2" y="9" width="4" height="7" fill={color} />
+      <rect x="16" y="9" width="4" height="7" fill={color} />
+      <rect x="6" y="8" width="10" height="9" fill={color} />
+      <rect x="6" y="17" width="10" height="4" fill="#e8edf0" />
+      <rect x="7" y="21" width="3" height="5" fill="#f0c08a" />
+      <rect x="12" y="21" width="3" height="5" fill="#f0c08a" />
+      <rect x="7" y="25" width="3" height="1" fill="#0b0d0e" />
+      <rect x="12" y="25" width="3" height="1" fill="#0b0d0e" />
+    </svg>
+  );
+}
+function Keeper({ color, size = 40 }) {
+  return (
+    <svg width={size} height={(size * 26) / 22} viewBox="0 0 22 26" shapeRendering="crispEdges" style={{ display: "block" }}>
+      <rect x="8" y="1" width="6" height="6" fill="#f0c08a" />
+      <rect x="2" y="1" width="3" height="3" fill="#f4f7f8" />
+      <rect x="17" y="1" width="3" height="3" fill="#f4f7f8" />
+      <rect x="2" y="4" width="3" height="9" fill={color} />
+      <rect x="17" y="4" width="3" height="9" fill={color} />
+      <rect x="6" y="7" width="10" height="9" fill={color} />
+      <rect x="6" y="16" width="10" height="4" fill="#1b1f22" />
+      <rect x="7" y="20" width="3" height="6" fill="#f0c08a" />
+      <rect x="12" y="20" width="3" height="6" fill="#f0c08a" />
+    </svg>
+  );
+}
+function Ball({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" style={{ display: "block" }}>
+      <circle cx="8" cy="8" r="7" fill="#f4f7f8" stroke="#0b0d0e" strokeWidth="1" />
+      <polygon points="8,4 11,6.4 9.8,10 6.2,10 5,6.4" fill="#0b0d0e" />
+      <rect x="2.5" y="7" width="1.6" height="1.6" fill="#0b0d0e" />
+      <rect x="12" y="7" width="1.6" height="1.6" fill="#0b0d0e" />
+    </svg>
+  );
+}
+
+function ScoreDots({ kicks, color }) {
+  const cells = Array.from({ length: Math.max(5, kicks.length) });
+  return (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+      {cells.map((_, i) => {
+        const k = kicks[i];
+        const c = k === "GOAL" ? "var(--green)" : k === undefined ? "transparent" : "var(--red)";
+        const bc = k === undefined ? "var(--line)" : c;
+        return <span key={i} title={k || ""} style={{ width: 11, height: 11, border: `1px solid ${bc}`, background: c, borderRadius: "50%" }} />;
+      })}
+    </div>
+  );
+}
+
+/* ---------- main ---------- */
+export default function PumpPenalty() {
+  const [serverSeed, setServerSeed] = useState("");
+  const [serverHash, setServerHash] = useState("");
+  const [clientSeed, setClientSeed] = useState("");
+  const [yourTeam, setYourTeam] = useState(TEAMS[0]);
+  const [oppTeam, setOppTeam] = useState(TEAMS[1]);
+  const [w, setW] = useState(360);
+  const sceneRef = useRef(null);
+  const [, setTick] = useState(0);
+  const rerender = () => setTick((t) => t + 1);
+
+  const G = useRef({ phase: "select", round: 1, turn: "you", ys: 0, os: 0, yk: [], ok: [], scene: { ballFly: false }, kickIndex: 0, winner: null, nonce: 0, lastHash: "", busy: false });
+
+  useEffect(() => {
+    const ss = randHex(16);
+    setServerSeed(ss);
+    setClientSeed("degen-" + randHex(3));
+    sha256Hex(ss).then(setServerHash);
+  }, []);
+
+  useEffect(() => {
+    const measure = () => sceneRef.current && setW(sceneRef.current.offsetWidth);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  useEffect(() => {
+    if (sceneRef.current) setW(sceneRef.current.offsetWidth);
+  }, [G.current.phase]);
+
+  const g = G.current;
+
+  function startGame() {
+    if (!yourTeam || !oppTeam || yourTeam.code === oppTeam.code) return;
+    G.current = { ...G.current, phase: "shoot", round: 1, turn: "you", ys: 0, os: 0, yk: [], ok: [], scene: { ballFly: false }, kickIndex: G.current.kickIndex + 1, winner: null, busy: false };
+    rerender();
+  }
+  function toSelect() {
+    G.current = { ...G.current, phase: "select", round: 1, turn: "you", ys: 0, os: 0, yk: [], ok: [], scene: { ballFly: false }, winner: null, busy: false };
+    rerender();
+  }
+  function randomizeClient() {
+    if (g.phase !== "select") return;
+    setClientSeed("degen-" + randHex(3));
+  }
+
+  function playKick({ actor, shotZone, keeperZone, result }) {
+    G.current.phase = "anim";
+    G.current.scene = { shotZone, keeperZone, ballFly: false, result, actor, showResult: false };
+    rerender();
+    requestAnimationFrame(() => { G.current.scene.ballFly = true; rerender(); });
+    setTimeout(() => {
+      const c = G.current;
+      c.scene.showResult = true;
+      if (actor === "you") { c.yk = [...c.yk, result]; if (result === "GOAL") c.ys++; }
+      else { c.ok = [...c.ok, result]; if (result === "GOAL") c.os++; }
+      rerender();
+    }, 480);
+    setTimeout(() => advance(actor), 1140);
+  }
+
+  function advance(actor) {
+    const c = G.current;
+    c.busy = false;
+    if (actor === "you") {
+      c.turn = "opp"; c.phase = "dive"; c.kickIndex++; c.scene = { ballFly: false }; rerender(); return;
+    }
+    const r = c.round, diff = Math.abs(c.ys - c.os);
+    if (r <= 5) {
+      const remaining = 5 - r;
+      if (diff > remaining) { c.phase = "done"; c.winner = c.ys > c.os ? "you" : "opp"; rerender(); return; }
+      if (r === 5) { c.round = 6; c.turn = "you"; c.phase = "shoot"; c.kickIndex++; c.scene = { ballFly: false }; rerender(); return; }
+      c.round = r + 1; c.turn = "you"; c.phase = "shoot"; c.kickIndex++; c.scene = { ballFly: false }; rerender(); return;
+    }
+    if (c.ys !== c.os) { c.phase = "done"; c.winner = c.ys > c.os ? "you" : "opp"; rerender(); return; }
+    c.round = r + 1; c.turn = "you"; c.phase = "shoot"; c.kickIndex++; c.scene = { ballFly: false }; rerender();
+  }
+
+  async function onShoot(zone) {
+    if (g.phase !== "shoot" || g.busy) return;
+    g.busy = true;
+    const n = g.nonce + 1; g.nonce = n;
+    const hash = await sha256Hex(`${serverSeed}:${clientSeed}:${n}`);
+    g.lastHash = hash;
+    const keeperZone = zoneFromHash(hash);
+    const { result } = outcome(yourTeam, oppTeam, zone, keeperZone, hash);
+    playKick({ actor: "you", shotZone: zone, keeperZone, result });
+  }
+  async function onDive(zone) {
+    if (g.phase !== "dive" || g.busy) return;
+    g.busy = true;
+    const n = g.nonce + 1; g.nonce = n;
+    const hash = await sha256Hex(`${serverSeed}:${clientSeed}:${n}`);
+    g.lastHash = hash;
+    const shotZone = zoneFromHash(hash);
+    const { result } = outcome(oppTeam, yourTeam, shotZone, zone, hash);
+    playKick({ actor: "opp", shotZone, keeperZone: zone, result });
+  }
+
+  // scene transforms
+  const s = g.scene;
+  const flying = s.ballFly;
+  const miss = s.result === "MISS";
+  const shotZone = s.shotZone ?? 1;
+  const keeperZone = s.keeperZone ?? 1;
+  const zx = (z) => (z - 1) * w * 0.27;
+  const bx = flying ? zx(shotZone) * (miss ? 1.5 : 1) : 0;
+  const by = flying ? -(SCENE_H * (miss ? 0.82 : 0.6)) : 0;
+  const ballTransform = `translate(calc(-50% + ${bx}px), calc(-50% + ${by}px)) scale(${flying ? 0.5 : 1})`;
+  const kx = flying ? zx(keeperZone) * 0.92 : 0;
+  const ky = flying ? (keeperZone === 1 ? -12 : 0) : 0;
+  const kdeg = flying ? (keeperZone - 1) * 26 : 0;
+  const keeperTransform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px)) rotate(${kdeg}deg)`;
+  const shooter = s.actor === "opp" ? oppTeam : yourTeam;
+  const keeperTeam = s.actor === "opp" ? yourTeam : oppTeam;
+  const resColor = s.result === "GOAL" ? "var(--green)" : s.result === "SAVED" ? "var(--gold)" : "var(--gray)";
+
+  const inMatch = g.phase === "shoot" || g.phase === "dive" || g.phase === "anim";
+  const sdLabel = g.round > 5 ? `Sudden death ${g.round - 5}` : `Round ${g.round} of 5`;
+
+  return (
+    <div className="pk-root">
+      <style>{CSS}</style>
+      <div className="wrap">
+        {/* header */}
+        <header style={{ marginBottom: 14, animation: "launch .45s ease both" }}>
+          <div className="eyebrow up">PUMP.FUN // PROVABLY FAIR SHOOTOUT</div>
+          <h1 className="disp" style={{ fontSize: "clamp(28px,7vw,46px)", fontWeight: 800, margin: "6px 0 8px", lineHeight: 1, letterSpacing: "-0.02em" }}>
+            PUMP <span style={{ color: "var(--green)" }}>PENALTY</span>
+          </h1>
+          <p className="mono" style={{ fontSize: 12.5, color: "var(--gray)", lineHeight: 1.5, margin: 0 }}>
+            Conversion odds come from Polymarket. Every kick rolls from a seed you can verify. Beat the keeper, then guess where they shoot.
+          </p>
+        </header>
+
+        {/* scoreboard */}
+        {inMatch || g.phase === "done" ? (
+          <div className="panel" style={{ padding: 12, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <PixelKit color={yourTeam.color} size={26} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="mono" style={{ fontSize: 12, fontWeight: 700 }}>YOU <span style={{ color: yourTeam.color }}>{yourTeam.code}</span></div>
+                <ScoreDots kicks={g.yk} />
+              </div>
+              <div className="disp" style={{ fontSize: 30, fontWeight: 800 }}>
+                <span style={{ color: "var(--green)" }}>{g.ys}</span>
+                <span style={{ color: "var(--dim)", margin: "0 6px" }}>:</span>
+                <span style={{ color: "var(--text)" }}>{g.os}</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
+                <div className="mono" style={{ fontSize: 12, fontWeight: 700 }}><span style={{ color: oppTeam.color }}>{oppTeam.code}</span> OPP</div>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}><ScoreDots kicks={g.ok} /></div>
+              </div>
+              <PixelKit color={oppTeam.color} size={26} />
+            </div>
+            <hr className="hr" style={{ margin: "10px 0 8px" }} />
+            <div className="lbl up" style={{ textAlign: "center" }}>{g.phase === "done" ? "Full time" : sdLabel}</div>
+          </div>
+        ) : null}
+
+        {/* pitch scene */}
+        {inMatch || g.phase === "done" ? (
+          <div ref={sceneRef} className="panel" style={{ position: "relative", height: SCENE_H, overflow: "hidden", marginBottom: 12, background: "linear-gradient(180deg,#0a1410 0%,#0c2a1a 60%,#0e3320 100%)" }}>
+            {/* goal frame */}
+            <div style={{ position: "absolute", top: 18, left: "9%", right: "9%", height: 104, border: "3px solid #e8edf0", borderBottom: "none", background: "repeating-linear-gradient(90deg,rgba(255,255,255,0.10) 0 1px,transparent 1px 13px),repeating-linear-gradient(0deg,rgba(255,255,255,0.10) 0 1px,transparent 1px 13px)" }}>
+              {/* net flash on goal */}
+              {s.showResult && s.result === "GOAL" && <div style={{ position: "absolute", inset: 0, background: "var(--green)", animation: "netflash .7s ease forwards" }} />}
+              {/* zone dividers */}
+              <div style={{ position: "absolute", top: 0, bottom: 0, left: "33.3%", width: 1, background: "rgba(255,255,255,0.12)" }} />
+              <div style={{ position: "absolute", top: 0, bottom: 0, left: "66.6%", width: 1, background: "rgba(255,255,255,0.12)" }} />
+            </div>
+            {/* goal line */}
+            <div style={{ position: "absolute", top: 122, left: "6%", right: "6%", height: 2, background: "rgba(255,255,255,0.25)" }} />
+            {/* penalty spot */}
+            <div style={{ position: "absolute", top: SCENE_H - 34, left: "50%", width: 6, height: 6, background: "#e8edf0", borderRadius: "50%", transform: "translateX(-50%)" }} />
+
+            {/* keeper */}
+            <div key={"k" + g.kickIndex} style={{ position: "absolute", left: "50%", top: 96, transform: keeperTransform, transition: "transform .4s ease-out", zIndex: 2 }}>
+              <Keeper color={keeperTeam.color} size={42} />
+            </div>
+            {/* shooter */}
+            <div style={{ position: "absolute", left: "50%", top: SCENE_H - 28, transform: `translate(calc(-50% - 26px), -50%) rotate(${flying ? -12 : 0}deg)`, transition: "transform .25s ease", zIndex: 1, opacity: 0.95 }}>
+              <PixelKit color={shooter.color} size={26} />
+            </div>
+            {/* ball */}
+            <div key={"b" + g.kickIndex} style={{ position: "absolute", left: "50%", top: SCENE_H - 31, transform: ballTransform, transition: "transform .45s cubic-bezier(.3,.7,.4,1)", zIndex: 3 }}>
+              <Ball size={16} />
+            </div>
+
+            {/* result overlay */}
+            {s.showResult && (
+              <div style={{ position: "absolute", top: 40, left: 0, right: 0, textAlign: "center", zIndex: 4 }}>
+                <div className="disp up" style={{ fontSize: 40, fontWeight: 800, color: resColor, animation: "pop .3s ease both", textShadow: "0 2px 16px rgba(0,0,0,0.6)" }}>{s.result}</div>
+              </div>
+            )}
+            {/* prompt */}
+            {(g.phase === "shoot" || g.phase === "dive") && (
+              <div style={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", zIndex: 4 }}>
+                <span className="mono up" style={{ fontSize: 11, color: g.phase === "shoot" ? "var(--green)" : "var(--gold)" }}>
+                  {g.phase === "shoot" ? "Aim your shot" : "Dive to save"}<span style={{ animation: "blink 1s step-end infinite" }}>_</span>
+                </span>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* controls during match */}
+        {(g.phase === "shoot" || g.phase === "dive") && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+            {ZONES.map((z, i) => (
+              <button key={z} className={`btn ${g.phase === "shoot" ? "btn-green" : "btn-gold"}`} onClick={() => (g.phase === "shoot" ? onShoot(i) : onDive(i))}>{z}</button>
+            ))}
+          </div>
+        )}
+        {g.phase === "anim" && (
+          <div style={{ textAlign: "center", marginBottom: 12 }}>
+            <span className="mono up" style={{ fontSize: 11, color: "var(--dim)" }}>resolving<span style={{ animation: "blink 1s step-end infinite" }}>_</span></span>
+          </div>
+        )}
+
+        {/* done banner */}
+        {g.phase === "done" && (
+          <div className="flow" style={{ marginBottom: 12, animation: "launch .4s ease both" }}>
+            <div style={{ background: "var(--panel)", padding: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <PixelKit color={(g.winner === "you" ? yourTeam : oppTeam).color} size={40} />
+              <div>
+                <div className="lbl up" style={{ color: g.winner === "you" ? "var(--green)" : "var(--red)" }}>{g.winner === "you" ? "You win" : "You lose"}</div>
+                <div className="disp" style={{ fontSize: 24, fontWeight: 800, lineHeight: 1 }}>
+                  {(g.winner === "you" ? yourTeam : oppTeam).name} take it {Math.max(g.ys, g.os)} to {Math.min(g.ys, g.os)}
+                </div>
+              </div>
+              <button className="btn btn-green" style={{ marginLeft: "auto" }} onClick={startGame}>Rematch</button>
+              <button className="btn" onClick={toSelect}>Change teams</button>
+            </div>
+          </div>
+        )}
+
+        {/* team select */}
+        {g.phase === "select" && (
+          <section className="panel" style={{ padding: 14, marginBottom: 12 }}>
+            <div className="lbl up" style={{ marginBottom: 8 }}>Your team</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+              {TEAMS.map((t) => {
+                const sel = yourTeam.code === t.code;
+                return (
+                  <button key={t.code} className="chip" onClick={() => { setYourTeam(t); if (oppTeam.code === t.code) setOppTeam(TEAMS.find((x) => x.code !== t.code)); }} style={{ borderColor: sel ? t.color : "var(--line)", background: sel ? "rgba(255,255,255,0.05)" : "#0a0e0f", color: sel ? t.color : "var(--text)" }}>
+                    {t.code} <span style={{ color: "var(--dim)" }}>{t.p}%</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="lbl up" style={{ marginBottom: 8 }}>Opponent</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+              {TEAMS.map((t) => {
+                const sel = oppTeam.code === t.code;
+                const same = yourTeam.code === t.code;
+                return (
+                  <button key={t.code} className="chip" disabled={same} onClick={() => setOppTeam(t)} style={{ opacity: same ? 0.25 : 1, borderColor: sel ? t.color : "var(--line)", background: sel ? "rgba(255,255,255,0.05)" : "#0a0e0f", color: sel ? t.color : "var(--text)" }}>
+                    {t.code} <span style={{ color: "var(--dim)" }}>{t.p}%</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: "var(--gray)", marginBottom: 12, lineHeight: 1.5 }}>
+              {yourTeam.name} sit at {yourTeam.p}% on Polymarket, {oppTeam.name} at {oppTeam.p}%. Higher implied odds means a slightly better striker and keeper. Reading the keeper still decides most kicks.
+            </div>
+            <button className="btn btn-green" style={{ width: "100%" }} onClick={startGame} disabled={yourTeam.code === oppTeam.code}>Start shootout</button>
+          </section>
+        )}
+
+        {/* provably fair panel */}
+        <section className="panel" style={{ padding: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
+            <div>
+              <div className="lbl up">Server seed (committed)</div>
+              <div className="mono" style={{ fontSize: 11, color: "var(--green)", wordBreak: "break-all", marginTop: 3 }}>{serverHash.slice(0, 22) || "…"}</div>
+            </div>
+            <div>
+              <div className="lbl up" style={{ marginBottom: 3 }}>Client seed</div>
+              <input className="inp" value={clientSeed} onChange={(e) => setClientSeed(e.target.value)} spellCheck={false} disabled={g.phase !== "select"} />
+              <button className="btn" style={{ marginTop: 6, padding: "5px 9px", fontSize: 10 }} onClick={randomizeClient} disabled={g.phase !== "select"}>Randomize</button>
+            </div>
+            <div>
+              <div className="lbl up">Kick nonce</div>
+              <div className="disp" style={{ fontSize: 28, fontWeight: 800, color: "var(--gold)", lineHeight: 1 }}>{g.nonce}</div>
+              <div className="lbl" style={{ marginTop: 2, wordBreak: "break-all" }}>last roll {g.lastHash ? g.lastHash.slice(0, 12) : "—"}</div>
+            </div>
+          </div>
+          <hr className="hr" style={{ margin: "10px 0 8px" }} />
+          <div className="mono" style={{ fontSize: 11, color: "var(--gray)", lineHeight: 1.5 }}>
+            Each kick rolls from sha256(server seed : client seed : nonce). Byte 0 picks the seed driven zone, bytes 1 to 4 set the conversion roll. Same inputs reproduce the same kick. Swap this for ORAO VRF on Solana to make the entropy verifiable on chain. See README for steps.
+          </div>
+        </section>
+
+        <footer className="mono" style={{ fontSize: 10.5, color: "var(--dim)", marginTop: 16, lineHeight: 1.6 }}>
+          Polymarket odds are a snapshot from 16 Jun 2026 and will move. Entertainment and simulation, not betting advice.
+        </footer>
+      </div>
+    </div>
+  );
+}

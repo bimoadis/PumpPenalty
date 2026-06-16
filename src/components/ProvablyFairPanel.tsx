@@ -1,0 +1,91 @@
+"use client";
+
+import React from "react";
+
+interface ProvablyFairPanelProps {
+  serverHash: string;
+  clientSeed: string;
+  setClientSeed: (s: string) => void;
+  nonce: number;
+  lastHash: string;
+  onRandomizeClient: () => void;
+  disabled: boolean;
+}
+
+export default function ProvablyFairPanel({
+  serverHash,
+  clientSeed,
+  setClientSeed,
+  nonce,
+  lastHash,
+  onRandomizeClient,
+  disabled,
+}: ProvablyFairPanelProps) {
+  return (
+    <section className="panel" style={{ padding: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
+          gap: 12,
+        }}
+      >
+        <div>
+          <div className="lbl up">Server seed (committed)</div>
+          <div
+            className="mono"
+            style={{
+              fontSize: 11,
+              color: "var(--green)",
+              wordBreak: "break-all",
+              marginTop: 3,
+            }}
+          >
+            {serverHash.slice(0, 22) || "…"}
+          </div>
+        </div>
+        <div>
+          <div className="lbl up" style={{ marginBottom: 3 }}>
+            Client seed
+          </div>
+          <input
+            className="inp"
+            value={clientSeed}
+            onChange={(e) => setClientSeed(e.target.value)}
+            spellCheck={false}
+            disabled={disabled}
+          />
+          <button
+            className="btn"
+            style={{ marginTop: 6, padding: "5px 9px", fontSize: 10 }}
+            onClick={onRandomizeClient}
+            disabled={disabled}
+          >
+            Randomize
+          </button>
+        </div>
+        <div>
+          <div className="lbl up">Kick nonce</div>
+          <div
+            className="disp"
+            style={{
+              fontSize: 28,
+              fontWeight: 800,
+              color: "var(--gold)",
+              lineHeight: 1,
+            }}
+          >
+            {nonce}
+          </div>
+          <div className="lbl" style={{ marginTop: 2, wordBreak: "break-all" }}>
+            last roll {lastHash ? lastHash.slice(0, 12) : "—"}
+          </div>
+        </div>
+      </div>
+      <hr className="hr" style={{ margin: "10px 0 8px" }} />
+      <div className="mono" style={{ fontSize: 11, color: "var(--gray)", lineHeight: 1.5 }}>
+        Each kick rolls from sha256(server seed : client seed : nonce). Byte 0 picks the seed driven zone, bytes 1 to 4 set the conversion roll. Same inputs reproduce the same kick. Swap this for ORAO VRF on Solana to make the entropy verifiable on chain. See README for steps.
+      </div>
+    </section>
+  );
+}
