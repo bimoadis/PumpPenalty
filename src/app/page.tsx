@@ -40,6 +40,9 @@ export default function Home() {
   const [clientSeed, setClientSeed] = useState("");
   const [yourTeam, setYourTeam] = useState<Team>(TEAMS[0]);
   const [oppTeam, setOppTeam] = useState<Team>(TEAMS[1]);
+  const [teamsList, setTeamsList] = useState<Team[]>(TEAMS);
+  const [loadingOdds, setLoadingOdds] = useState(false);
+  const [oddsSource, setOddsSource] = useState<"static" | "polymarket" | "simulation" | "fallback">("static");
 
   const stateRef = useRef<GameState>({
     phase: "select",
@@ -69,6 +72,27 @@ export default function Home() {
     });
   };
 
+  const fetchLiveOdds = async () => {
+    setLoadingOdds(true);
+    try {
+      const res = await fetch("/api/odds");
+      if (!res.ok) throw new Error("Failed to fetch live odds");
+      const data = await res.json();
+      if (data.success && Array.isArray(data.teams)) {
+        setTeamsList(data.teams);
+        setOddsSource(data.source);
+        
+        // Sync selected teams
+        setYourTeam(prev => data.teams.find((t: Team) => t.code === prev.code) || prev);
+        setOppTeam(prev => data.teams.find((t: Team) => t.code === prev.code) || prev);
+      }
+    } catch (err) {
+      console.error("Error fetching live odds:", err);
+    } finally {
+      setLoadingOdds(false);
+    }
+  };
+
   // Safe client mounting
   useEffect(() => {
     setMounted(true);
@@ -76,6 +100,7 @@ export default function Home() {
     setServerSeed(ss);
     setClientSeed("degen-" + randHex(3));
     sha256Hex(ss).then(setServerHash);
+    fetchLiveOdds();
   }, []);
 
   function startGame() {
@@ -377,6 +402,10 @@ export default function Home() {
             setYourTeam={setYourTeam}
             setOppTeam={setOppTeam}
             onStartGame={startGame}
+            teamsList={teamsList}
+            loadingOdds={loadingOdds}
+            oddsSource={oddsSource}
+            onRefreshOdds={fetchLiveOdds}
           />
         )}
 
