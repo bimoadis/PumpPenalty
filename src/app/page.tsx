@@ -10,6 +10,9 @@ import ScoreBoard from "@/components/ScoreBoard";
 import PitchScene from "@/components/PitchScene";
 import Controls from "@/components/Controls";
 import ProvablyFairPanel from "@/components/ProvablyFairPanel";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { Web3GameSimulator } from "@/utils/web3GameSimulator";
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
@@ -44,6 +47,21 @@ export default function Home() {
   const [teamsList, setTeamsList] = useState<Team[]>(TEAMS);
   const [loadingOdds, setLoadingOdds] = useState(false);
   const [oddsSource, setOddsSource] = useState<"static" | "polymarket" | "simulation" | "fallback">("static");
+
+  // Web3 State Variables
+  const [playMode, setPlayMode] = useState<"web2" | "web3">("web2");
+  const [betAmount, setBetAmount] = useState<string>("0.1");
+  const [solBalance, setSolBalance] = useState<number>(5.0);
+  const [txHash, setTxHash] = useState<string>("");
+  const [isAwaitingOracle, setIsAwaitingOracle] = useState<boolean>(false);
+  const [sessionHash, setSessionHash] = useState<string>("");
+
+  const { publicKey, connected } = useWallet();
+
+  // Database / Leaderboard State Variables
+  const [activeTab, setActiveTab] = useState<"leaderboard" | "history">("leaderboard");
+  const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
+  const [myMatches, setMyMatches] = useState<any[]>([]);
 
   const stateRef = useRef<GameState>({
     phase: "select",
@@ -99,11 +117,110 @@ export default function Home() {
     setMounted(true);
     setClientSeed("degen-" + randHex(3));
     fetchLiveOdds();
+    fetchLeaderboard();
   }, []);
+
+  // Load local match history on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("pump_penalty_matches");
+      if (stored) {
+        try {
+          setMyMatches(JSON.parse(stored));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+  }, []);
+
+  const addLocalMatch = (match: any) => {
+    setMyMatches(prev => {
+      const updated = [match, ...prev].slice(0, 20); // Keep last 20
+      if (typeof window !== "undefined") {
+        localStorage.setItem("pump_penalty_matches", JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
+  const fetchLeaderboard = async () => {
+    try {
+      const res = await fetch("/api/leaderboard");
+      if (!res.ok) throw new Error("Failed to fetch leaderboard");
+      const data = await res.json();
+      if (data.success) {
+        setLeaderboardData(data.leaderboard);
+      }
+    } catch (err) {
+      console.error("Error fetching leaderboard:", err);
+    }
+  };
+
+  const recordMatchResult = async (finalState: GameState, sSeed: string) => {
+    // 1. Catat ke local storage terlebih dahulu agar fungsionalitas offline terjamin
+    const localId = "local-" + Math.random().toString(36).substring(2, 10);
+    const localMatch = {
+      id: localId,
+      player_team: yourTeam.code,
+      opponent_team: oppTeam.code,
+      player_score: finalState.ys,
+      opponent_score: finalState.os,
+      outcome: finalState.winner === "you" ? "win" : "lose",
+      server_seed: sSeed,
+      client_seed: clientSeed,
+      nonce_count: finalState.nonce,
+      created_at: new Date().toISOString()
+    };
+    addLocalMatch(localMatch);
+
+    // 2. Kirim data ke Supabase API secara asynchronous
+    try {
+      const payload = {
+        walletAddress: playMode === "web3" && publicKey ? publicKey.toBase58() : null,
+        username: playMode === "web3" && publicKey ? publicKey.toBase58().slice(0, 6) + "..." + publicKey.toBase58().slice(-4) : "Player-" + clientSeed.slice(-4),
+        playerTeam: yourTeam.code,
+        opponentTeam: oppTeam.code,
+        playerScore: finalState.ys,
+        opponentScore: finalState.os,
+        outcome: finalState.winner === "you" ? "win" : "lose",
+        serverSeed: sSeed,
+        clientSeed,
+        nonceCount: finalState.nonce,
+      };
+
+      const res = await fetch("/api/match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        console.log("Match recorded in remote database:", data.matchId);
+        fetchLeaderboard();
+      } else {
+        console.warn("Supabase save warning:", data.warning || data.error);
+      }
+    } catch (err) {
+      console.warn("Network error saving to database:", err);
+    }
+  };
+
+  const auditMatch = async (match: any) => {
+    const resolvedHash = await sha256Hex(match.server_seed);
+    setServerHash(resolvedHash);
+    setClientSeed(match.client_seed);
+    setRevealedServerSeed(match.server_seed);
+    updateState((s) => {
+      s.nonce = match.nonce_count;
+      s.lastHash = "";
+    });
+  };
 
   // Reveal server seed automatically when game is finished
   useEffect(() => {
-    if (gameState.phase === "done" && sessionToken) {
+    if (gameState.phase === "done" && sessionToken && playMode === "web2") {
       const revealSeed = async () => {
         try {
           const res = await fetch("/api/game/reveal", {
@@ -114,6 +231,8 @@ export default function Home() {
           const data = await res.json();
           if (data.success) {
             setRevealedServerSeed(data.serverSeed);
+            // Record match result in Supabase
+            recordMatchResult(gameState, data.serverSeed);
           }
         } catch (err) {
           console.error("Error revealing server seed:", err);
@@ -121,10 +240,78 @@ export default function Home() {
       };
       revealSeed();
     }
-  }, [gameState.phase, sessionToken]);
+  }, [gameState.phase, sessionToken, playMode]);
+
+  // Reveal server seed in Web3 mode
+  useEffect(() => {
+    if (gameState.phase === "done" && playMode === "web3" && sessionHash) {
+      const session = Web3GameSimulator.getSession(sessionHash);
+      if (session) {
+        setRevealedServerSeed(session.serverSeed);
+      }
+    }
+  }, [gameState.phase, playMode, sessionHash]);
 
   async function startGame() {
     if (!yourTeam || !oppTeam || yourTeam.code === oppTeam.code) return;
+
+    if (playMode === "web3") {
+      if (!connected || !publicKey) {
+        alert("Please connect your Solana wallet first!");
+        return;
+      }
+      const bet = parseFloat(betAmount);
+      if (isNaN(bet) || bet <= 0) {
+        alert("Please enter a valid bet amount!");
+        return;
+      }
+      if (solBalance < bet) {
+        alert("Insufficient simulated SOL balance!");
+        return;
+      }
+
+      updateState((s) => {
+        s.busy = true;
+      });
+
+      try {
+        setSolBalance(prev => parseFloat((prev - bet).toFixed(3)));
+        const { session, txHash: initTx } = Web3GameSimulator.initialize(
+          publicKey.toBase58(),
+          yourTeam,
+          oppTeam,
+          clientSeed,
+          bet
+        );
+        setTxHash(initTx);
+        setServerHash(session.serverHash);
+        setSessionHash(publicKey.toBase58());
+        setRevealedServerSeed("");
+
+        updateState((s) => {
+          s.phase = session.gameState.phase;
+          s.round = session.gameState.round;
+          s.turn = session.gameState.turn;
+          s.ys = session.gameState.ys;
+          s.os = session.gameState.os;
+          s.yk = [...session.gameState.yk];
+          s.ok = [...session.gameState.ok];
+          s.scene = { ballFly: false };
+          s.kickIndex = session.gameState.kickIndex;
+          s.winner = session.gameState.winner;
+          s.nonce = session.gameState.nonce;
+          s.lastHash = session.gameState.lastHash;
+          s.busy = false;
+        });
+      } catch (err) {
+        console.error("Error starting Web3 game:", err);
+        updateState((s) => {
+          s.busy = false;
+        });
+      }
+      return;
+    }
+
     updateState((s) => {
       s.busy = true;
     });
@@ -171,6 +358,11 @@ export default function Home() {
     setSessionToken("");
     setRevealedServerSeed("");
     setServerHash("");
+    setTxHash("");
+    if (sessionHash) {
+      Web3GameSimulator.clearSession(sessionHash);
+      setSessionHash("");
+    }
     updateState((s) => {
       s.phase = "select";
       s.round = 1;
@@ -256,6 +448,49 @@ export default function Home() {
     updateState((s) => {
       s.busy = true;
     });
+
+    if (playMode === "web3" && sessionHash) {
+      setIsAwaitingOracle(true);
+      try {
+        const res = await Web3GameSimulator.processAction(sessionHash, zone, "shoot");
+        setIsAwaitingOracle(false);
+        if (res.success && res.gameState) {
+          setTxHash(res.txHash || "");
+          playKick({
+            actor: "you",
+            shotZone: zone,
+            keeperZone: res.opponentZone!,
+            result: res.result!,
+            nextGameState: res.gameState,
+            nextSessionToken: "",
+          });
+
+          if (res.gameState.phase === "done") {
+            const finalState = res.gameState;
+            if (finalState.winner === "you") {
+              const winnings = parseFloat(betAmount) * 1.8;
+              setSolBalance(prev => parseFloat((prev + winnings).toFixed(3)));
+            }
+            const session = Web3GameSimulator.getSession(sessionHash);
+            if (session) {
+              recordMatchResult(finalState, session.serverSeed);
+            }
+          }
+        } else {
+          updateState((s) => {
+            s.busy = false;
+          });
+        }
+      } catch (err) {
+        console.error("Error in Web3 onShoot:", err);
+        setIsAwaitingOracle(false);
+        updateState((s) => {
+          s.busy = false;
+        });
+      }
+      return;
+    }
+
     try {
       const res = await fetch("/api/game/shoot", {
         method: "POST",
@@ -295,6 +530,49 @@ export default function Home() {
     updateState((s) => {
       s.busy = true;
     });
+
+    if (playMode === "web3" && sessionHash) {
+      setIsAwaitingOracle(true);
+      try {
+        const res = await Web3GameSimulator.processAction(sessionHash, zone, "dive");
+        setIsAwaitingOracle(false);
+        if (res.success && res.gameState) {
+          setTxHash(res.txHash || "");
+          playKick({
+            actor: "opp",
+            shotZone: res.opponentZone!,
+            keeperZone: zone,
+            result: res.result!,
+            nextGameState: res.gameState,
+            nextSessionToken: "",
+          });
+
+          if (res.gameState.phase === "done") {
+            const finalState = res.gameState;
+            if (finalState.winner === "you") {
+              const winnings = parseFloat(betAmount) * 1.8;
+              setSolBalance(prev => parseFloat((prev + winnings).toFixed(3)));
+            }
+            const session = Web3GameSimulator.getSession(sessionHash);
+            if (session) {
+              recordMatchResult(finalState, session.serverSeed);
+            }
+          }
+        } else {
+          updateState((s) => {
+            s.busy = false;
+          });
+        }
+      } catch (err) {
+        console.error("Error in Web3 onDive:", err);
+        setIsAwaitingOracle(false);
+        updateState((s) => {
+          s.busy = false;
+        });
+      }
+      return;
+    }
+
     try {
       const res = await fetch("/api/game/shoot", {
         method: "POST",
@@ -357,23 +635,96 @@ export default function Home() {
       <div className="wrap">
         {/* header */}
         <header style={{ marginBottom: 14, animation: "launch .45s ease both" }}>
-          <div className="eyebrow up">PUMP.FUN // PROVABLY FAIR SHOOTOUT</div>
-          <h1
-            className="disp"
-            style={{
-              fontSize: "clamp(28px,7vw,46px)",
-              fontWeight: 800,
-              margin: "6px 0 8px",
-              lineHeight: 1,
-              letterSpacing: "-0.02em",
-            }}
-          >
-            PUMP <span style={{ color: "var(--green)" }}>PENALTY</span>
-          </h1>
-          <p className="mono" style={{ fontSize: 12.5, color: "var(--gray)", lineHeight: 1.5, margin: 0 }}>
-            Conversion odds come from Polymarket. Every kick rolls from a seed you can verify. Beat the keeper, then guess where they shoot.
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div className="eyebrow up">PUMP.FUN // PROVABLY FAIR SHOOTOUT</div>
+              <h1
+                className="disp"
+                style={{
+                  fontSize: "clamp(28px,7vw,46px)",
+                  fontWeight: 800,
+                  margin: "6px 0 8px",
+                  lineHeight: 1,
+                  letterSpacing: "-0.02em",
+                }}
+              >
+                PUMP <span style={{ color: "var(--green)" }}>PENALTY</span>
+              </h1>
+            </div>
+            
+            {/* Mode Toggle & Wallet Connection Button */}
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="panel" style={{ display: "flex", padding: 2, background: "#0a0e0f" }}>
+                <button
+                  className="mono"
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    border: 0,
+                    background: playMode === "web2" ? "var(--green)" : "transparent",
+                    color: playMode === "web2" ? "#000" : "var(--gray)",
+                    cursor: "pointer",
+                    textTransform: "uppercase",
+                  }}
+                  onClick={() => setPlayMode("web2")}
+                  disabled={gameState.phase !== "select"}
+                >
+                  Web2 Demo
+                </button>
+                <button
+                  className="mono"
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    border: 0,
+                    background: playMode === "web3" ? "var(--green)" : "transparent",
+                    color: playMode === "web3" ? "#000" : "var(--gray)",
+                    cursor: "pointer",
+                    textTransform: "uppercase",
+                  }}
+                  onClick={() => setPlayMode("web3")}
+                  disabled={gameState.phase !== "select"}
+                >
+                  Web3 Solana
+                </button>
+              </div>
+              <WalletMultiButton />
+            </div>
+          </div>
+          <p className="mono" style={{ fontSize: 12.5, color: "var(--gray)", lineHeight: 1.5, margin: "8px 0 0" }}>
+            {playMode === "web3"
+              ? "Running in On-Chain mode. Bets are placed in SOL and randomness is resolved via Solana VRF Oracle."
+              : "Conversion odds come from Polymarket. Every kick rolls from a seed you can verify. Beat the keeper, then guess where they shoot."}
           </p>
         </header>
+
+        {/* Web3 Betting Panel */}
+        {gameState.phase === "select" && playMode === "web3" && (
+          <div className="panel" style={{ padding: 16, marginBottom: 14, borderLeft: "3px solid var(--gold)" }}>
+            <div className="lbl up" style={{ marginBottom: 6, color: "var(--gold)" }}>Web3 Betting Config (Devnet)</div>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <label className="lbl up" style={{ fontSize: 10, display: "block", marginBottom: 4 }}>Bet Amount (SOL)</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.05"
+                  className="inp"
+                  value={betAmount}
+                  onChange={(e) => setBetAmount(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="lbl up" style={{ fontSize: 10, display: "block", marginBottom: 4 }}>Player Simulated Wallet Balance</label>
+                <div className="disp" style={{ fontSize: 20, fontWeight: 800, color: "var(--green)" }}>
+                  {connected ? `${solBalance.toFixed(3)} SOL` : "Wallet Not Connected"}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* scoreboard */}
         {(inMatch || gameState.phase === "done") && (
@@ -391,6 +742,42 @@ export default function Home() {
             yourTeam={yourTeam}
             oppTeam={oppTeam}
           />
+        )}
+
+        {/* awaiting oracle message overlay */}
+        {isAwaitingOracle && (
+          <div
+            className="panel"
+            style={{
+              padding: 16,
+              textAlign: "center",
+              marginBottom: 14,
+              border: "1px solid var(--gold)",
+              background: "#0c0d0e",
+            }}
+          >
+            <div className="disp" style={{ color: "var(--gold)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              ⚡ Awaiting Solana VRF Oracle (ORAO)...
+            </div>
+            <div className="mono" style={{ fontSize: 10, color: "var(--gray)", marginTop: 4 }}>
+              Requesting verifiable randomness on-chain
+            </div>
+            {txHash && (
+              <div
+                className="mono"
+                style={{
+                  fontSize: 9,
+                  color: "var(--dim)",
+                  marginTop: 8,
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Tx Signature: {txHash}
+              </div>
+            )}
+          </div>
         )}
 
         {/* controls during match */}
@@ -477,6 +864,158 @@ export default function Home() {
           disabled={gameState.phase !== "select"}
           revealedServerSeed={revealedServerSeed}
         />
+
+        {/* Solana transaction logs auditor */}
+        {playMode === "web3" && sessionHash && (
+          <div className="panel" style={{ padding: 16, marginTop: 14, borderLeft: "3px solid var(--green)" }}>
+            <div className="lbl up" style={{ marginBottom: 8, color: "var(--green)", fontWeight: 700 }}>
+              Solana On-Chain Transaction Logs
+            </div>
+            <div className="mono" style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 6 }}>
+              {Web3GameSimulator.getSession(sessionHash)?.txHistory.map((tx, idx) => (
+                <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <span style={{ color: "var(--gray)" }}>{idx + 1}. {tx.action}</span>
+                  <span style={{ color: "var(--dim)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", maxWidth: "70%" }}>
+                    {tx.txHash}
+                  </span>
+                </div>
+              ))}
+              {txHash && (
+                <div style={{ marginTop: 8, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+                  <span style={{ color: "var(--gold)" }}>Latest Tx Sign: </span>
+                  <span style={{ color: "var(--text)" }}>{txHash}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Leaderboard and Match History section */}
+        <div className="panel" style={{ marginTop: 14, padding: 16 }}>
+          <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 12 }}>
+            <button
+              className="mono"
+              style={{
+                padding: "8px 16px",
+                border: 0,
+                background: activeTab === "leaderboard" ? "var(--line)" : "transparent",
+                color: activeTab === "leaderboard" ? "var(--green)" : "var(--gray)",
+                cursor: "pointer",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                fontSize: 12,
+              }}
+              onClick={() => setActiveTab("leaderboard")}
+            >
+              🏆 Top Standings
+            </button>
+            <button
+              className="mono"
+              style={{
+                padding: "8px 16px",
+                border: 0,
+                background: activeTab === "history" ? "var(--line)" : "transparent",
+                color: activeTab === "history" ? "var(--green)" : "var(--gray)",
+                cursor: "pointer",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                fontSize: 12,
+              }}
+              onClick={() => setActiveTab("history")}
+            >
+              📜 My Matches
+            </button>
+          </div>
+
+          {activeTab === "leaderboard" && (
+            <div>
+              {leaderboardData.length === 0 ? (
+                <div className="mono" style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", padding: "12px 0" }}>
+                  No ranks recorded yet. Win a shootout to be the first!
+                </div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--line)", textAlign: "left", color: "var(--dim)" }}>
+                      <th style={{ padding: "6px 4px" }}>Rank</th>
+                      <th style={{ padding: "6px 4px" }}>Player</th>
+                      <th style={{ padding: "6px 4px" }}>Wallet</th>
+                      <th style={{ padding: "6px 4px", textAlign: "right" }}>Wins</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leaderboardData.map((row: any, idx: number) => (
+                      <tr key={idx} style={{ borderBottom: "1px solid #141a1c" }}>
+                        <td style={{ padding: "8px 4px", color: idx === 0 ? "var(--gold)" : "var(--text)", fontWeight: 700 }}>
+                          #{idx + 1}
+                        </td>
+                        <td style={{ padding: "8px 4px" }}>{row.username}</td>
+                        <td style={{ padding: "8px 4px", color: "var(--dim)", fontFamily: "monospace" }}>
+                          {row.wallet_address ? `${row.wallet_address.slice(0, 6)}...${row.wallet_address.slice(-4)}` : "Demo Mode"}
+                        </td>
+                        <td style={{ padding: "8px 4px", textAlign: "right", color: "var(--green)", fontWeight: 700 }}>
+                          {row.total_wins}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {activeTab === "history" && (
+            <div>
+              {myMatches.length === 0 ? (
+                <div className="mono" style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", padding: "12px 0" }}>
+                  You haven't played any matches yet.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {myMatches.map((match: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="panel"
+                      style={{
+                        padding: 10,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: 11,
+                        background: "#0a0e0f",
+                      }}
+                    >
+                      <div>
+                        <span
+                          style={{
+                            color: match.outcome === "win" ? "var(--green)" : "var(--red)",
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            marginRight: 8,
+                          }}
+                        >
+                          {match.outcome === "win" ? "WIN" : "LOSS"}
+                        </span>
+                        <span className="mono">
+                          {match.player_team} vs {match.opponent_team} ({match.player_score}-{match.opponent_score})
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <button
+                          className="chip"
+                          style={{ padding: "2px 6px", fontSize: 9 }}
+                          onClick={() => auditMatch(match)}
+                        >
+                          🔍 Audit
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <footer className="mono" style={{ fontSize: 10.5, color: "var(--dim)", marginTop: 16, lineHeight: 1.6 }}>
           Polymarket odds are a snapshot from 16 Jun 2026 and will move. Entertainment and simulation, not betting advice.
