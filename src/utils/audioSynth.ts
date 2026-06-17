@@ -260,3 +260,76 @@ export function stopBGM() {
     bgmInterval = null;
   }
 }
+
+let crowdAmbientNode: AudioBufferSourceNode | null = null;
+let crowdGainNode: GainNode | null = null;
+let crowdLFONode: OscillatorNode | null = null;
+
+// 8. Crowd Ambient Sound (stadium crowd murmur with LFO sweeps)
+export function startCrowdAmbient(isMuted: boolean = false) {
+  if (isMuted) {
+    stopCrowdAmbient();
+    return;
+  }
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  if (crowdAmbientNode) return; // Already running
+
+  const duration = 2.0;
+  const bufferSize = ctx.sampleRate * duration;
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  // Generate continuous murmur using low-amplitude noise
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+
+  crowdAmbientNode = ctx.createBufferSource();
+  crowdAmbientNode.buffer = buffer;
+  crowdAmbientNode.loop = true;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = 500;
+  filter.Q.value = 0.8;
+
+  crowdGainNode = ctx.createGain();
+  crowdGainNode.gain.setValueAtTime(0.012, ctx.currentTime); // Soft background level
+
+  crowdAmbientNode.connect(filter);
+  filter.connect(crowdGainNode);
+  crowdGainNode.connect(ctx.destination);
+
+  // Slow LFO for stadium volume & frequency waves
+  crowdLFONode = ctx.createOscillator();
+  crowdLFONode.type = "sine";
+  crowdLFONode.frequency.value = 0.25; // Wave once every 4 seconds
+
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 120; // Sweeps filter frequency by +/- 120Hz
+
+  crowdLFONode.connect(lfoGain);
+  lfoGain.connect(filter.frequency);
+
+  crowdAmbientNode.start(0);
+  crowdLFONode.start(0);
+}
+
+export function stopCrowdAmbient() {
+  if (crowdAmbientNode) {
+    try {
+      crowdAmbientNode.stop();
+    } catch (e) {}
+    crowdAmbientNode = null;
+  }
+  if (crowdLFONode) {
+    try {
+      crowdLFONode.stop();
+    } catch (e) {}
+    crowdLFONode = null;
+  }
+  crowdGainNode = null;
+}
+

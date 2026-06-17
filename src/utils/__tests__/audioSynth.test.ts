@@ -1,4 +1,4 @@
-import { playKickSound, playGoalSound, playSaveSound, playWhistleSound, playPostHitSound, playCheerSound, startBGM, stopBGM } from "../audioSynth";
+import { playKickSound, playGoalSound, playSaveSound, playWhistleSound, playPostHitSound, playCheerSound, startBGM, stopBGM, startCrowdAmbient, stopCrowdAmbient } from "../audioSynth";
 
 describe("audioSynth - Audio playback initializers", () => {
   let mockOscillator: any;
@@ -151,6 +151,27 @@ describe("audioSynth - Audio playback initializers", () => {
     stopBGM();
     jest.advanceTimersByTime(400);
     expect(mockAudioContext.createOscillator).not.toHaveBeenCalled();
+  });
+
+  test("startCrowdAmbient initializes AudioContext and plays looping noise", () => {
+    const { startCrowdAmbient } = require("../audioSynth");
+    startCrowdAmbient(false);
+    expect(window.AudioContext).toHaveBeenCalled();
+    expect(mockAudioContext.createBufferSource).toHaveBeenCalled();
+    expect(mockBufferSource.loop).toBe(true);
+  });
+
+  test("stopCrowdAmbient stops looping noise and oscillator LFO", () => {
+    const { startCrowdAmbient, stopCrowdAmbient } = require("../audioSynth");
+    startCrowdAmbient(false);
+    expect(window.AudioContext).toHaveBeenCalled();
+
+    mockBufferSource.stop = jest.fn();
+    mockOscillator.stop = jest.fn();
+
+    stopCrowdAmbient();
+    expect(mockBufferSource.stop).toHaveBeenCalled();
+    expect(mockOscillator.stop).toHaveBeenCalled();
   });
 
   test("resumes suspended AudioContext", () => {

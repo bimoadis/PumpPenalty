@@ -13,7 +13,7 @@ import ProvablyFairPanel from "@/components/ProvablyFairPanel";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Web3GameSimulator } from "@/utils/web3GameSimulator";
-import { playKickSound, playGoalSound, playSaveSound, playWhistleSound, playPostHitSound, playCheerSound, startBGM, stopBGM } from "@/utils/audioSynth";
+import { playKickSound, playGoalSound, playSaveSound, playWhistleSound, playPostHitSound, playCheerSound, startBGM, stopBGM, startCrowdAmbient, stopCrowdAmbient } from "@/utils/audioSynth";
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
@@ -143,9 +143,11 @@ export default function Home() {
         setIsMuted(muted);
         if (!muted) {
           startBGM(false);
+          startCrowdAmbient(false);
         }
       } else {
         startBGM(false);
+        startCrowdAmbient(false);
       }
     }
   }, []);
@@ -157,8 +159,10 @@ export default function Home() {
         localStorage.setItem("pump_penalty_muted", String(next));
         if (next) {
           stopBGM();
+          stopCrowdAmbient();
         } else {
           startBGM(false);
+          startCrowdAmbient(false);
         }
       }
       return next;
@@ -286,6 +290,7 @@ export default function Home() {
   async function startGame() {
     if (!yourTeam || !oppTeam || yourTeam.code === oppTeam.code) return;
     startBGM(isMuted);
+    startCrowdAmbient(isMuted);
     playWhistleSound(isMuted);
 
     if (playMode === "web3") {
