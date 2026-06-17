@@ -13,7 +13,7 @@ import ProvablyFairPanel from "@/components/ProvablyFairPanel";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Web3GameSimulator } from "@/utils/web3GameSimulator";
-import { playKickSound, playGoalSound, playSaveSound, playWhistleSound } from "@/utils/audioSynth";
+import { playKickSound, playGoalSound, playSaveSound, playWhistleSound, playPostHitSound, playCheerSound, startBGM, stopBGM } from "@/utils/audioSynth";
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
@@ -139,7 +139,13 @@ export default function Home() {
 
       const storedMute = localStorage.getItem("pump_penalty_muted");
       if (storedMute) {
-        setIsMuted(storedMute === "true");
+        const muted = storedMute === "true";
+        setIsMuted(muted);
+        if (!muted) {
+          startBGM(false);
+        }
+      } else {
+        startBGM(false);
       }
     }
   }, []);
@@ -149,6 +155,11 @@ export default function Home() {
       const next = !prev;
       if (typeof window !== "undefined") {
         localStorage.setItem("pump_penalty_muted", String(next));
+        if (next) {
+          stopBGM();
+        } else {
+          startBGM(false);
+        }
       }
       return next;
     });
@@ -274,6 +285,7 @@ export default function Home() {
 
   async function startGame() {
     if (!yourTeam || !oppTeam || yourTeam.code === oppTeam.code) return;
+    startBGM(isMuted);
     playWhistleSound(isMuted);
 
     if (playMode === "web3") {
@@ -420,17 +432,30 @@ export default function Home() {
     nextGameState: GameState;
     nextSessionToken: string;
   }) {
+    // Deterministically decide if a MISS result hits the post/crossbar
+    let visualResult = result;
+    if (result === "MISS") {
+      const hashVal = nextGameState.lastHash || Math.random().toString();
+      const rollNum = parseInt(hashVal.slice(10, 14), 16) % 100;
+      if (rollNum < 40) {
+        visualResult = "POST";
+      }
+    }
+
     updateState((s) => {
       s.phase = "anim";
       s.scene = {
         shotZone,
         keeperZone,
         ballFly: false,
-        result,
+        result: visualResult,
         actor,
         showResult: false,
       };
     });
+
+    // Make sure BGM is started on interaction
+    startBGM(isMuted);
 
     // Trigger kick sound
     playKickSound(isMuted);
@@ -451,10 +476,18 @@ export default function Home() {
       });
 
       // Play outcome audio and shake screen
-      if (result === "GOAL") {
+      if (visualResult === "GOAL") {
         playGoalSound(isMuted);
+        playCheerSound(isMuted);
         setTriggerShake(true);
         setTimeout(() => setTriggerShake(false), 300);
+      } else if (visualResult === "POST") {
+        playPostHitSound(isMuted);
+        setTriggerShake(true);
+        setTimeout(() => setTriggerShake(false), 300);
+        updateState((s) => {
+          (s.scene as any).bounce = true;
+        });
       } else {
         playSaveSound(isMuted);
         setTriggerShake(true);
@@ -474,6 +507,17 @@ export default function Home() {
         s.busy = false;
         s.scene = { ballFly: false };
       });
+
+      // Play cheers if game finished and you won
+      if (nextGameState.phase === "done") {
+        if (nextGameState.winner === "you") {
+          playGoalSound(isMuted);
+          playCheerSound(isMuted);
+        } else {
+          playSaveSound(isMuted);
+        }
+      }
+
       if (nextSessionToken) {
         setSessionToken(nextSessionToken);
       }

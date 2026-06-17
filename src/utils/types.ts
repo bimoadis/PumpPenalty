@@ -7,7 +7,7 @@ export interface Team {
 
 export type Zone = 0 | 1 | 2; // Left, Center, Right
 
-export type KickResult = "GOAL" | "SAVED" | "MISS";
+export type KickResult = "GOAL" | "SAVED" | "MISS" | "POST";
 
 export interface GameSceneState {
   ballFly: boolean;

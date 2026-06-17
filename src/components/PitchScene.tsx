@@ -36,13 +36,46 @@ export default function PitchScene({ gameState, yourTeam, oppTeam }: PitchSceneP
 
   const s = gameState.scene;
   const flying = s.ballFly;
-  const miss = s.result === "MISS";
+  const miss = s.result === "MISS" || s.result === "POST";
+  const post = s.result === "POST";
   const shotZone = s.shotZone ?? 1;
   const keeperZone = s.keeperZone ?? 1;
 
   const zx = (z: number) => (z - 1) * w * 0.27;
-  const bx = flying ? zx(shotZone) * (miss ? 1.5 : 1) : 0;
-  const by = flying ? -(SCENE_H * (miss ? 0.82 : 0.6)) : 0;
+
+  let bx = 0;
+  let by = 0;
+  if (flying) {
+    if (post) {
+      if ((s as any).bounce) {
+        if (shotZone === 0) {
+          bx = -w * 0.32;
+          by = -60;
+        } else if (shotZone === 2) {
+          bx = w * 0.32;
+          by = -60;
+        } else {
+          bx = 0;
+          by = -80;
+        }
+      } else {
+        if (shotZone === 0) {
+          bx = -w * 0.41;
+          by = -120;
+        } else if (shotZone === 2) {
+          bx = w * 0.41;
+          by = -120;
+        } else {
+          bx = 0;
+          by = -192;
+        }
+      }
+    } else {
+      bx = zx(shotZone) * (miss ? 1.5 : 1);
+      by = -(SCENE_H * (miss ? 0.82 : 0.6));
+    }
+  }
+
   const ballTransform = `translate(calc(-50% + ${bx}px), calc(-50% + ${by}px)) scale(${flying ? 0.5 : 1})`;
 
   const kx = flying ? zx(keeperZone) * 0.92 : 0;
@@ -57,6 +90,8 @@ export default function PitchScene({ gameState, yourTeam, oppTeam }: PitchSceneP
     s.result === "GOAL"
       ? "var(--green)"
       : s.result === "SAVED"
+      ? "var(--gold)"
+      : s.result === "POST"
       ? "var(--gold)"
       : "var(--gray)";
 

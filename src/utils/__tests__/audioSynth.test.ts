@@ -1,4 +1,4 @@
-import { playKickSound, playGoalSound, playSaveSound, playWhistleSound } from "../audioSynth";
+import { playKickSound, playGoalSound, playSaveSound, playWhistleSound, playPostHitSound, playCheerSound, startBGM, stopBGM } from "../audioSynth";
 
 describe("audioSynth - Audio playback initializers", () => {
   let mockOscillator: any;
@@ -17,6 +17,8 @@ describe("audioSynth - Audio playback initializers", () => {
   });
 
   beforeEach(() => {
+    jest.useFakeTimers();
+
     mockOscillator = {
       connect: jest.fn(),
       start: jest.fn(),
@@ -50,6 +52,12 @@ describe("audioSynth - Audio playback initializers", () => {
       type: "bandpass",
       frequency: {
         value: 350,
+        setValueAtTime: jest.fn(),
+        exponentialRampToValueAtTime: jest.fn(),
+        linearRampToValueAtTime: jest.fn(),
+      },
+      Q: {
+        value: 1.0,
       },
     };
 
@@ -64,7 +72,10 @@ describe("audioSynth - Audio playback initializers", () => {
       destination: {},
       currentTime: 10,
       state: "suspended",
-      resume: jest.fn().mockResolvedValue(undefined),
+      resume: jest.fn().mockImplementation(function (this: any) {
+        this.state = "running";
+        return Promise.resolve();
+      }),
       sampleRate: 44100,
     };
 
@@ -73,6 +84,7 @@ describe("audioSynth - Audio playback initializers", () => {
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     // Reset module-level caching of AudioContext
     jest.resetModules();
   });
@@ -105,6 +117,40 @@ describe("audioSynth - Audio playback initializers", () => {
     const { playWhistleSound } = require("../audioSynth");
     playWhistleSound(false);
     expect(window.AudioContext).toHaveBeenCalled();
+  });
+
+  test("playPostHitSound initializes AudioContext when not muted", () => {
+    const { playPostHitSound } = require("../audioSynth");
+    playPostHitSound(false);
+    expect(window.AudioContext).toHaveBeenCalled();
+  });
+
+  test("playCheerSound initializes AudioContext when not muted", () => {
+    const { playCheerSound } = require("../audioSynth");
+    playCheerSound(false);
+    expect(window.AudioContext).toHaveBeenCalled();
+  });
+
+  test("startBGM initializes AudioContext and sets up interval", () => {
+    const { startBGM } = require("../audioSynth");
+    startBGM(false);
+    expect(window.AudioContext).toHaveBeenCalled();
+
+    // Advance timers to trigger the chiptune player steps
+    jest.advanceTimersByTime(400);
+    expect(mockAudioContext.createOscillator).toHaveBeenCalled();
+  });
+
+  test("stopBGM clears background BGM interval", () => {
+    const { startBGM, stopBGM } = require("../audioSynth");
+    startBGM(false);
+    expect(window.AudioContext).toHaveBeenCalled();
+
+    mockAudioContext.createOscillator.mockClear();
+
+    stopBGM();
+    jest.advanceTimersByTime(400);
+    expect(mockAudioContext.createOscillator).not.toHaveBeenCalled();
   });
 
   test("resumes suspended AudioContext", () => {
