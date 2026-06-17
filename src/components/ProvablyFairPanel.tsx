@@ -1,6 +1,7 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
+import { sha256Hex } from "@/utils/crypto";
 
 interface ProvablyFairPanelProps {
   serverHash: string;
@@ -10,6 +11,7 @@ interface ProvablyFairPanelProps {
   lastHash: string;
   onRandomizeClient: () => void;
   disabled: boolean;
+  revealedServerSeed?: string;
 }
 
 export default function ProvablyFairPanel({
@@ -20,7 +22,24 @@ export default function ProvablyFairPanel({
   lastHash,
   onRandomizeClient,
   disabled,
+  revealedServerSeed,
 }: ProvablyFairPanelProps) {
+  const [auditStatus, setAuditStatus] = useState<"pending" | "valid" | "invalid">("pending");
+
+  useEffect(() => {
+    if (revealedServerSeed && serverHash) {
+      sha256Hex(revealedServerSeed).then((hash) => {
+        if (hash === serverHash) {
+          setAuditStatus("valid");
+        } else {
+          setAuditStatus("invalid");
+        }
+      });
+    } else {
+      setAuditStatus("pending");
+    }
+  }, [revealedServerSeed, serverHash]);
+
   return (
     <section className="panel" style={{ padding: 12 }}>
       <div
@@ -41,8 +60,28 @@ export default function ProvablyFairPanel({
               marginTop: 3,
             }}
           >
-            {serverHash.slice(0, 22) || "…"}
+            {serverHash ? serverHash.slice(0, 22) + "..." : "…"}
           </div>
+          
+          {revealedServerSeed && (
+            <div style={{ marginTop: 8 }}>
+              <div className="lbl up">Revealed Plaintext Seed</div>
+              <div
+                className="mono"
+                style={{
+                  fontSize: 10,
+                  color: "var(--text)",
+                  wordBreak: "break-all",
+                  background: "#050708",
+                  padding: 4,
+                  border: "1px dashed var(--line)",
+                  marginTop: 2,
+                }}
+              >
+                {revealedServerSeed}
+              </div>
+            </div>
+          )}
         </div>
         <div>
           <div className="lbl up" style={{ marginBottom: 3 }}>
@@ -82,6 +121,27 @@ export default function ProvablyFairPanel({
           </div>
         </div>
       </div>
+      
+      {auditStatus !== "pending" && (
+        <div 
+          className="mono"
+          style={{ 
+            marginTop: 12, 
+            padding: 8, 
+            background: auditStatus === "valid" ? "rgba(0, 255, 136, 0.08)" : "rgba(255, 59, 92, 0.08)",
+            border: `1px solid ${auditStatus === "valid" ? "var(--green)" : "var(--red)"}`,
+            fontSize: 11,
+            color: auditStatus === "valid" ? "var(--green)" : "var(--red)"
+          }}
+        >
+          {auditStatus === "valid" ? (
+            <span>✔ PROVABLY FAIR VERIFIED: Revealed server seed matches initial commitment hash!</span>
+          ) : (
+            <span>❌ WARNING: AUDIT FAILED! Revealed server seed does NOT match initial hash!</span>
+          )}
+        </div>
+      )}
+
       <hr className="hr" style={{ margin: "10px 0 8px" }} />
       <div className="mono" style={{ fontSize: 11, color: "var(--gray)", lineHeight: 1.5 }}>
         Each kick rolls from sha256(server seed : client seed : nonce). Byte 0 picks the seed driven zone, bytes 1 to 4 set the conversion roll. Same inputs reproduce the same kick. Swap this for ORAO VRF on Solana to make the entropy verifiable on chain. See README for steps.
