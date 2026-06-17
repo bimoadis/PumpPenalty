@@ -13,6 +13,7 @@ import ProvablyFairPanel from "@/components/ProvablyFairPanel";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Web3GameSimulator } from "@/utils/web3GameSimulator";
+import { playKickSound, playGoalSound, playSaveSound, playWhistleSound } from "@/utils/audioSynth";
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
@@ -62,6 +63,10 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<"leaderboard" | "history">("leaderboard");
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
   const [myMatches, setMyMatches] = useState<any[]>([]);
+
+  // Audio and Animation State Variables
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [triggerShake, setTriggerShake] = useState<boolean>(false);
 
   const stateRef = useRef<GameState>({
     phase: "select",
@@ -131,8 +136,23 @@ export default function Home() {
           console.error(e);
         }
       }
+
+      const storedMute = localStorage.getItem("pump_penalty_muted");
+      if (storedMute) {
+        setIsMuted(storedMute === "true");
+      }
     }
   }, []);
+
+  const toggleMute = () => {
+    setIsMuted(prev => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("pump_penalty_muted", String(next));
+      }
+      return next;
+    });
+  };
 
   const addLocalMatch = (match: any) => {
     setMyMatches(prev => {
@@ -254,6 +274,7 @@ export default function Home() {
 
   async function startGame() {
     if (!yourTeam || !oppTeam || yourTeam.code === oppTeam.code) return;
+    playWhistleSound(isMuted);
 
     if (playMode === "web3") {
       if (!connected || !publicKey) {
@@ -411,6 +432,9 @@ export default function Home() {
       };
     });
 
+    // Trigger kick sound
+    playKickSound(isMuted);
+
     requestAnimationFrame(() => {
       updateState((s) => {
         s.scene.ballFly = true;
@@ -425,6 +449,17 @@ export default function Home() {
         s.yk = [...nextGameState.yk];
         s.ok = [...nextGameState.ok];
       });
+
+      // Play outcome audio and shake screen
+      if (result === "GOAL") {
+        playGoalSound(isMuted);
+        setTriggerShake(true);
+        setTimeout(() => setTriggerShake(false), 300);
+      } else {
+        playSaveSound(isMuted);
+        setTriggerShake(true);
+        setTimeout(() => setTriggerShake(false), 200);
+      }
     }, 480);
 
     setTimeout(() => {
@@ -439,7 +474,9 @@ export default function Home() {
         s.busy = false;
         s.scene = { ballFly: false };
       });
-      setSessionToken(nextSessionToken);
+      if (nextSessionToken) {
+        setSessionToken(nextSessionToken);
+      }
     }, 1140);
   }
 
@@ -632,7 +669,7 @@ export default function Home() {
 
   return (
     <div className="pk-root">
-      <div className="wrap">
+      <div className={`wrap ${triggerShake ? "shake-screen" : ""}`}>
         {/* header */}
         <header style={{ marginBottom: 14, animation: "launch .45s ease both" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
@@ -654,6 +691,24 @@ export default function Home() {
             
             {/* Mode Toggle & Wallet Connection Button */}
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                className="mono btn"
+                style={{
+                  padding: "8px 10px",
+                  fontSize: 12,
+                  height: 36,
+                  width: 36,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderColor: "var(--line)",
+                }}
+                onClick={toggleMute}
+                title={isMuted ? "Unmute" : "Mute"}
+              >
+                {isMuted ? "🔇" : "🔊"}
+              </button>
+              
               <div className="panel" style={{ display: "flex", padding: 2, background: "#0a0e0f" }}>
                 <button
                   className="mono"
