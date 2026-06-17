@@ -212,8 +212,8 @@ export default function Home() {
     // 2. Kirim data ke Supabase API secara asynchronous
     try {
       const payload = {
-        walletAddress: playMode === "web3" && publicKey ? publicKey.toBase58() : null,
-        username: playMode === "web3" && publicKey ? publicKey.toBase58().slice(0, 6) + "..." + publicKey.toBase58().slice(-4) : "Player-" + clientSeed.slice(-4),
+        walletAddress: publicKey ? publicKey.toBase58() : null,
+        username: publicKey ? publicKey.toBase58().slice(0, 6) + "..." + publicKey.toBase58().slice(-4) : "Player-" + clientSeed.slice(-4),
         playerTeam: yourTeam.code,
         opponentTeam: oppTeam.code,
         playerScore: finalState.ys,
