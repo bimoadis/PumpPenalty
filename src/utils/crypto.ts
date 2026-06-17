@@ -3,7 +3,7 @@ export async function sha256Hex(msg: string): Promise<string> {
     // Return a dummy value during SSR
     return "";
   }
-  const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(msg));
+  const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(msg) as any);
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 

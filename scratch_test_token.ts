@@ -1,4 +1,4 @@
-import { encryptSession, decryptSession } from "./src/utils/sessionCrypto.ts";
+import { encryptSession, decryptSession } from "./src/utils/sessionCrypto";
 
 const mockPayload = {
   serverSeed: "5e883f8914a0f4e2f854e4efb1e8470a2a4b8df81775f0a2d0ef238210382838",

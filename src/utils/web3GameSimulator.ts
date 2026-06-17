@@ -236,7 +236,7 @@ export class Web3GameSimulator {
       if (result === "GOAL") gameState.os++;
     }
 
-    let nextPhase = action;
+    let nextPhase: GameState["phase"] = action;
     let nextTurn = gameState.turn;
     let nextRound = gameState.round;
     let nextKickIndex = gameState.kickIndex;
