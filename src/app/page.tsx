@@ -50,6 +50,22 @@ function outcome(
 const zoneFromHash = (hash: string): Zone =>
   (parseInt(hash.slice(0, 2), 16) % 3) as Zone;
 
+const INITIAL_GAME_STATE: GameState = {
+  phase: "select",
+  round: 1,
+  turn: "you",
+  ys: 0,
+  os: 0,
+  yk: [],
+  ok: [],
+  scene: { ballFly: false },
+  kickIndex: 0,
+  winner: null,
+  nonce: 0,
+  lastHash: "",
+  busy: false,
+};
+
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [serverHash, setServerHash] = useState("");
@@ -96,23 +112,9 @@ export default function Home() {
       console.error("Copy failed", err);
     }
   };
-  const stateRef = useRef<GameState>({
-    phase: "select",
-    round: 1,
-    turn: "you",
-    ys: 0,
-    os: 0,
-    yk: [],
-    ok: [],
-    scene: { ballFly: false },
-    kickIndex: 0,
-    winner: null,
-    nonce: 0,
-    lastHash: "",
-    busy: false,
-  });
+  const stateRef = useRef<GameState>(INITIAL_GAME_STATE);
 
-  const [gameState, setGameState] = useState<GameState>(stateRef.current);
+  const [gameState, setGameState] = useState<GameState>(INITIAL_GAME_STATE);
 
   const updateState = (updater: (draft: GameState) => void) => {
     updater(stateRef.current);
@@ -146,6 +148,19 @@ export default function Home() {
       console.error("Error fetching live odds:", err);
     } finally {
       setLoadingOdds(false);
+    }
+  };
+
+  const fetchLeaderboard = async () => {
+    try {
+      const res = await fetch("/api/leaderboard");
+      if (!res.ok) throw new Error("Failed to fetch leaderboard");
+      const data = await res.json();
+      if (data.success) {
+        setLeaderboardData(data.leaderboard);
+      }
+    } catch (err) {
+      console.error("Error fetching leaderboard:", err);
     }
   };
 
@@ -211,18 +226,7 @@ export default function Home() {
     });
   };
 
-  const fetchLeaderboard = async () => {
-    try {
-      const res = await fetch("/api/leaderboard");
-      if (!res.ok) throw new Error("Failed to fetch leaderboard");
-      const data = await res.json();
-      if (data.success) {
-        setLeaderboardData(data.leaderboard);
-      }
-    } catch (err) {
-      console.error("Error fetching leaderboard:", err);
-    }
-  };
+
 
   const recordMatchResult = async (finalState: GameState, sSeed: string) => {
     // 1. Catat ke local storage terlebih dahulu agar fungsionalitas offline terjamin
@@ -476,8 +480,9 @@ export default function Home() {
     // Deterministically decide if a MISS result hits the post/crossbar
     let visualResult = result;
     if (result === "MISS") {
-      const hashVal = nextGameState.lastHash || Math.random().toString();
-      const rollNum = parseInt(hashVal.slice(10, 14), 16) % 100;
+      const hashVal = nextGameState.lastHash || clientSeed || "default";
+      const parsedHex = parseInt(hashVal.slice(10, 14), 16);
+      const rollNum = isNaN(parsedHex) ? 0 : parsedHex % 100;
       if (rollNum < 40) {
         visualResult = "POST";
       }
