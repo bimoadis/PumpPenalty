@@ -13,7 +13,19 @@ import ProvablyFairPanel from "@/components/ProvablyFairPanel";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Web3GameSimulator } from "@/utils/web3GameSimulator";
-import { playKickSound, playGoalSound, playSaveSound, playWhistleSound, playPostHitSound, playCheerSound, startBGM, stopBGM, startCrowdAmbient, stopCrowdAmbient } from "@/utils/audioSynth";
+import { Copy, Check } from "lucide-react";
+import {
+  playKickSound,
+  playGoalSound,
+  playSaveSound,
+  playWhistleSound,
+  playPostHitSound,
+  playCheerSound,
+  startBGM,
+  stopBGM,
+  startCrowdAmbient,
+  stopCrowdAmbient,
+} from "@/utils/audioSynth";
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
@@ -22,7 +34,7 @@ function outcome(
   keeper: Team,
   shotZone: Zone,
   keeperZone: Zone,
-  hash: string
+  hash: string,
 ): { result: KickResult; roll: number; conv: number } {
   const roll = parseInt(hash.slice(2, 10), 16) / 0xffffffff;
   const ss = shooter.p / 16;
@@ -35,7 +47,8 @@ function outcome(
   return { result: roll < conv ? "GOAL" : "MISS", roll, conv };
 }
 
-const zoneFromHash = (hash: string): Zone => (parseInt(hash.slice(0, 2), 16) % 3) as Zone;
+const zoneFromHash = (hash: string): Zone =>
+  (parseInt(hash.slice(0, 2), 16) % 3) as Zone;
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -47,7 +60,9 @@ export default function Home() {
   const [oppTeam, setOppTeam] = useState<Team>(TEAMS[1]);
   const [teamsList, setTeamsList] = useState<Team[]>(TEAMS);
   const [loadingOdds, setLoadingOdds] = useState(false);
-  const [oddsSource, setOddsSource] = useState<"static" | "polymarket" | "simulation" | "fallback">("static");
+  const [oddsSource, setOddsSource] = useState<
+    "static" | "polymarket" | "simulation" | "fallback"
+  >("static");
 
   // Web3 State Variables
   const [playMode, setPlayMode] = useState<"web2" | "web3">("web2");
@@ -60,7 +75,9 @@ export default function Home() {
   const { publicKey, connected } = useWallet();
 
   // Database / Leaderboard State Variables
-  const [activeTab, setActiveTab] = useState<"leaderboard" | "history">("leaderboard");
+  const [activeTab, setActiveTab] = useState<"leaderboard" | "history">(
+    "leaderboard",
+  );
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
   const [myMatches, setMyMatches] = useState<any[]>([]);
 
@@ -68,6 +85,17 @@ export default function Home() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [triggerShake, setTriggerShake] = useState<boolean>(false);
 
+  const CA_STRING = "HTUmzhSLa989sMkJcDjeBg4n5HyJ6jqVwdxe6vWMpump";
+  const [copiedCA, setCopiedCA] = useState<boolean>(false);
+  const copyCA = async () => {
+    try {
+      await navigator.clipboard.writeText(CA_STRING);
+      setCopiedCA(true);
+      setTimeout(() => setCopiedCA(false), 1800);
+    } catch (err) {
+      console.error("Copy failed", err);
+    }
+  };
   const stateRef = useRef<GameState>({
     phase: "select",
     round: 1,
@@ -105,10 +133,14 @@ export default function Home() {
       if (data.success && Array.isArray(data.teams)) {
         setTeamsList(data.teams);
         setOddsSource(data.source);
-        
+
         // Sync selected teams
-        setYourTeam(prev => data.teams.find((t: Team) => t.code === prev.code) || prev);
-        setOppTeam(prev => data.teams.find((t: Team) => t.code === prev.code) || prev);
+        setYourTeam(
+          (prev) => data.teams.find((t: Team) => t.code === prev.code) || prev,
+        );
+        setOppTeam(
+          (prev) => data.teams.find((t: Team) => t.code === prev.code) || prev,
+        );
       }
     } catch (err) {
       console.error("Error fetching live odds:", err);
@@ -153,7 +185,7 @@ export default function Home() {
   }, []);
 
   const toggleMute = () => {
-    setIsMuted(prev => {
+    setIsMuted((prev) => {
       const next = !prev;
       if (typeof window !== "undefined") {
         localStorage.setItem("pump_penalty_muted", String(next));
@@ -170,7 +202,7 @@ export default function Home() {
   };
 
   const addLocalMatch = (match: any) => {
-    setMyMatches(prev => {
+    setMyMatches((prev) => {
       const updated = [match, ...prev].slice(0, 20); // Keep last 20
       if (typeof window !== "undefined") {
         localStorage.setItem("pump_penalty_matches", JSON.stringify(updated));
@@ -205,7 +237,7 @@ export default function Home() {
       server_seed: sSeed,
       client_seed: clientSeed,
       nonce_count: finalState.nonce,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
     };
     addLocalMatch(localMatch);
 
@@ -213,7 +245,11 @@ export default function Home() {
     try {
       const payload = {
         walletAddress: publicKey ? publicKey.toBase58() : null,
-        username: publicKey ? publicKey.toBase58().slice(0, 6) + "..." + publicKey.toBase58().slice(-4) : "Player-" + clientSeed.slice(-4),
+        username: publicKey
+          ? publicKey.toBase58().slice(0, 6) +
+          "..." +
+          publicKey.toBase58().slice(-4)
+          : "Player-" + clientSeed.slice(-4),
         playerTeam: yourTeam.code,
         opponentTeam: oppTeam.code,
         playerScore: finalState.ys,
@@ -313,13 +349,13 @@ export default function Home() {
       });
 
       try {
-        setSolBalance(prev => parseFloat((prev - bet).toFixed(3)));
+        setSolBalance((prev) => parseFloat((prev - bet).toFixed(3)));
         const { session, txHash: initTx } = Web3GameSimulator.initialize(
           publicKey.toBase58(),
           yourTeam,
           oppTeam,
           clientSeed,
-          bet
+          bet,
         );
         setTxHash(initTx);
         setServerHash(session.serverHash);
@@ -538,7 +574,11 @@ export default function Home() {
     if (playMode === "web3" && sessionHash) {
       setIsAwaitingOracle(true);
       try {
-        const res = await Web3GameSimulator.processAction(sessionHash, zone, "shoot");
+        const res = await Web3GameSimulator.processAction(
+          sessionHash,
+          zone,
+          "shoot",
+        );
         setIsAwaitingOracle(false);
         if (res.success && res.gameState) {
           setTxHash(res.txHash || "");
@@ -555,7 +595,7 @@ export default function Home() {
             const finalState = res.gameState;
             if (finalState.winner === "you") {
               const winnings = parseFloat(betAmount) * 1.8;
-              setSolBalance(prev => parseFloat((prev + winnings).toFixed(3)));
+              setSolBalance((prev) => parseFloat((prev + winnings).toFixed(3)));
             }
             const session = Web3GameSimulator.getSession(sessionHash);
             if (session) {
@@ -620,7 +660,11 @@ export default function Home() {
     if (playMode === "web3" && sessionHash) {
       setIsAwaitingOracle(true);
       try {
-        const res = await Web3GameSimulator.processAction(sessionHash, zone, "dive");
+        const res = await Web3GameSimulator.processAction(
+          sessionHash,
+          zone,
+          "dive",
+        );
         setIsAwaitingOracle(false);
         if (res.success && res.gameState) {
           setTxHash(res.txHash || "");
@@ -637,7 +681,7 @@ export default function Home() {
             const finalState = res.gameState;
             if (finalState.winner === "you") {
               const winnings = parseFloat(betAmount) * 1.8;
-              setSolBalance(prev => parseFloat((prev + winnings).toFixed(3)));
+              setSolBalance((prev) => parseFloat((prev + winnings).toFixed(3)));
             }
             const session = Web3GameSimulator.getSession(sessionHash);
             if (session) {
@@ -699,10 +743,64 @@ export default function Home() {
         <div className="wrap">
           <header style={{ marginBottom: 14 }}>
             <div className="eyebrow up">PUMP.FUN // PROVABLY FAIR SHOOTOUT</div>
-            <h1 className="disp" style={{ fontSize: "clamp(28px,7vw,46px)", fontWeight: 800, margin: "6px 0 8px", lineHeight: 1, letterSpacing: "-0.02em" }}>
+            <div
+              onClick={copyCA}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                cursor: "pointer",
+                margin: "6px 0 8px",
+                padding: "6px 10px",
+                border: "1px solid var(--line)",
+                background: "rgba(255,255,255,0.02)",
+                userSelect: "none",
+              }}
+              title="Click to copy Contract Address"
+            >
+              <span className="mono" style={{ fontSize: 13, color: "var(--dim)" }}>
+                CA <span style={{ color: "var(--text)", fontWeight: "bold" }}>{CA_STRING}</span>
+              </span>
+              {copiedCA ? (
+                <Check size={14} style={{ color: "var(--green)" }} />
+              ) : (
+                <Copy size={14} style={{ color: "var(--gray)" }} />
+              )}
+            </div>
+            <h1
+              className="disp"
+              style={{
+                fontSize: "clamp(28px,7vw,46px)",
+                fontWeight: 800,
+                margin: "6px 0 8px",
+                lineHeight: 1,
+                letterSpacing: "-0.02em",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <img
+                src="/logo.png"
+                alt="logo"
+                style={{
+                  width: 42,
+                  height: 42,
+                  marginRight: 8,
+                  verticalAlign: "middle",
+                }}
+              />
               PUMP <span style={{ color: "var(--green)" }}>PENALTY</span>
             </h1>
-            <p className="mono" style={{ fontSize: 12.5, color: "var(--gray)", lineHeight: 1.5, margin: 0 }}>
+            <p
+              className="mono"
+              style={{
+                fontSize: 12.5,
+                color: "var(--gray)",
+                lineHeight: 1.5,
+                margin: 0,
+              }}
+            >
               Loading components...
             </p>
           </header>
@@ -720,10 +818,46 @@ export default function Home() {
     <div className="pk-root">
       <div className={`wrap ${triggerShake ? "shake-screen" : ""}`}>
         {/* header */}
-        <header style={{ marginBottom: 14, animation: "launch .45s ease both" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+        <header
+          style={{ marginBottom: 14, animation: "launch .45s ease both" }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 16,
+              flexWrap: "wrap",
+            }}
+          >
             <div>
-              <div className="eyebrow up">PUMP.FUN // PROVABLY FAIR SHOOTOUT</div>
+              <div className="eyebrow up">
+                PUMP.FUN // PROVABLY FAIR SHOOTOUT
+              </div>
+              <div
+                onClick={copyCA}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  margin: "6px 0 8px",
+                  padding: "6px 10px",
+                  border: "1px solid var(--line)",
+                  background: "rgba(255,255,255,0.02)",
+                  userSelect: "none",
+                }}
+                title="Click to copy Contract Address"
+              >
+                <span className="mono" style={{ fontSize: 13, color: "var(--dim)" }}>
+                  CA <span style={{ color: "var(--text)", fontWeight: "bold" }}>{CA_STRING}</span>
+                </span>
+                {copiedCA ? (
+                  <Check size={14} style={{ color: "var(--green)" }} />
+                ) : (
+                  <Copy size={14} style={{ color: "var(--gray)" }} />
+                )}
+              </div>
               <h1
                 className="disp"
                 style={{
@@ -732,14 +866,34 @@ export default function Home() {
                   margin: "6px 0 8px",
                   lineHeight: 1,
                   letterSpacing: "-0.02em",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
                 }}
               >
+                <img
+                  src="/logo.png"
+                  alt="logo"
+                  style={{
+                    width: 36,
+                    height: 36,
+                    marginRight: 8,
+                    verticalAlign: "middle",
+                  }}
+                />
                 PUMP <span style={{ color: "var(--green)" }}>PENALTY</span>
               </h1>
             </div>
-            
+
             {/* Mode Toggle & Wallet Connection Button */}
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
               <button
                 className="mono btn"
                 style={{
@@ -757,8 +911,11 @@ export default function Home() {
               >
                 {isMuted ? "🔇" : "🔊"}
               </button>
-              
-              <div className="panel" style={{ display: "flex", padding: 2, background: "#0a0e0f" }}>
+
+              <div
+                className="panel"
+                style={{ display: "flex", padding: 2, background: "#0a0e0f" }}
+              >
                 <button
                   className="mono"
                   style={{
@@ -766,7 +923,8 @@ export default function Home() {
                     fontSize: 10,
                     fontWeight: 700,
                     border: 0,
-                    background: playMode === "web2" ? "var(--green)" : "transparent",
+                    background:
+                      playMode === "web2" ? "var(--green)" : "transparent",
                     color: playMode === "web2" ? "#000" : "var(--gray)",
                     cursor: "pointer",
                     textTransform: "uppercase",
@@ -783,7 +941,8 @@ export default function Home() {
                     fontSize: 10,
                     fontWeight: 700,
                     border: 0,
-                    background: playMode === "web3" ? "var(--green)" : "transparent",
+                    background:
+                      playMode === "web3" ? "var(--green)" : "transparent",
                     color: playMode === "web3" ? "#000" : "var(--gray)",
                     cursor: "pointer",
                     textTransform: "uppercase",
@@ -797,7 +956,15 @@ export default function Home() {
               <WalletMultiButton />
             </div>
           </div>
-          <p className="mono" style={{ fontSize: 12.5, color: "var(--gray)", lineHeight: 1.5, margin: "8px 0 0" }}>
+          <p
+            className="mono"
+            style={{
+              fontSize: 12.5,
+              color: "var(--gray)",
+              lineHeight: 1.5,
+              margin: "8px 0 0",
+            }}
+          >
             {playMode === "web3"
               ? "Running in On-Chain mode. Bets are placed in SOL and randomness is resolved via Solana VRF Oracle."
               : "Conversion odds come from Polymarket. Every kick rolls from a seed you can verify. Beat the keeper, then guess where they shoot."}
@@ -806,11 +973,35 @@ export default function Home() {
 
         {/* Web3 Betting Panel */}
         {gameState.phase === "select" && playMode === "web3" && (
-          <div className="panel" style={{ padding: 16, marginBottom: 14, borderLeft: "3px solid var(--gold)" }}>
-            <div className="lbl up" style={{ marginBottom: 6, color: "var(--gold)" }}>Web3 Betting Config (Devnet)</div>
-            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            className="panel"
+            style={{
+              padding: 16,
+              marginBottom: 14,
+              borderLeft: "3px solid var(--gold)",
+            }}
+          >
+            <div
+              className="lbl up"
+              style={{ marginBottom: 6, color: "var(--gold)" }}
+            >
+              Web3 Betting Config (Devnet)
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 14,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
               <div style={{ flex: 1, minWidth: 150 }}>
-                <label className="lbl up" style={{ fontSize: 10, display: "block", marginBottom: 4 }}>Bet Amount (SOL)</label>
+                <label
+                  className="lbl up"
+                  style={{ fontSize: 10, display: "block", marginBottom: 4 }}
+                >
+                  Bet Amount (SOL)
+                </label>
                 <input
                   type="number"
                   step="0.05"
@@ -821,9 +1012,23 @@ export default function Home() {
                 />
               </div>
               <div>
-                <label className="lbl up" style={{ fontSize: 10, display: "block", marginBottom: 4 }}>Player Simulated Wallet Balance</label>
-                <div className="disp" style={{ fontSize: 20, fontWeight: 800, color: "var(--green)" }}>
-                  {connected ? `${solBalance.toFixed(3)} SOL` : "Wallet Not Connected"}
+                <label
+                  className="lbl up"
+                  style={{ fontSize: 10, display: "block", marginBottom: 4 }}
+                >
+                  Player Simulated Wallet Balance
+                </label>
+                <div
+                  className="disp"
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 800,
+                    color: "var(--green)",
+                  }}
+                >
+                  {connected
+                    ? `${solBalance.toFixed(3)} SOL`
+                    : "Wallet Not Connected"}
                 </div>
               </div>
             </div>
@@ -860,10 +1065,22 @@ export default function Home() {
               background: "#0c0d0e",
             }}
           >
-            <div className="disp" style={{ color: "var(--gold)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            <div
+              className="disp"
+              style={{
+                color: "var(--gold)",
+                fontSize: 13,
+                fontWeight: 800,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
               ⚡ Awaiting Solana VRF Oracle (ORAO)...
             </div>
-            <div className="mono" style={{ fontSize: 10, color: "var(--gray)", marginTop: 4 }}>
+            <div
+              className="mono"
+              style={{ fontSize: 10, color: "var(--gray)", marginTop: 4 }}
+            >
               Requesting verifiable randomness on-chain
             </div>
             {txHash && (
@@ -893,7 +1110,10 @@ export default function Home() {
 
         {/* done banner */}
         {gameState.phase === "done" && (
-          <div className="flow" style={{ marginBottom: 12, animation: "launch .4s ease both" }}>
+          <div
+            className="flow"
+            style={{ marginBottom: 12, animation: "launch .4s ease both" }}
+          >
             <div
               style={{
                 background: "var(--panel)",
@@ -905,9 +1125,7 @@ export default function Home() {
               }}
             >
               <PixelKit
-                color={
-                  (gameState.winner === "you" ? yourTeam : oppTeam).color
-                }
+                color={(gameState.winner === "you" ? yourTeam : oppTeam).color}
                 size={40}
               />
               <div>
@@ -922,7 +1140,10 @@ export default function Home() {
                 >
                   {gameState.winner === "you" ? "You win" : "You lose"}
                 </div>
-                <div className="disp" style={{ fontSize: 24, fontWeight: 800, lineHeight: 1 }}>
+                <div
+                  className="disp"
+                  style={{ fontSize: 24, fontWeight: 800, lineHeight: 1 }}
+                >
                   {(gameState.winner === "you" ? yourTeam : oppTeam).name} take
                   it {Math.max(gameState.ys, gameState.os)} to{" "}
                   {Math.min(gameState.ys, gameState.os)}
@@ -971,21 +1192,68 @@ export default function Home() {
 
         {/* Solana transaction logs auditor */}
         {playMode === "web3" && sessionHash && (
-          <div className="panel" style={{ padding: 16, marginTop: 14, borderLeft: "3px solid var(--green)" }}>
-            <div className="lbl up" style={{ marginBottom: 8, color: "var(--green)", fontWeight: 700 }}>
+          <div
+            className="panel"
+            style={{
+              padding: 16,
+              marginTop: 14,
+              borderLeft: "3px solid var(--green)",
+            }}
+          >
+            <div
+              className="lbl up"
+              style={{
+                marginBottom: 8,
+                color: "var(--green)",
+                fontWeight: 700,
+              }}
+            >
               Solana On-Chain Transaction Logs
             </div>
-            <div className="mono" style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 6 }}>
-              {Web3GameSimulator.getSession(sessionHash)?.txHistory.map((tx, idx) => (
-                <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                  <span style={{ color: "var(--gray)" }}>{idx + 1}. {tx.action}</span>
-                  <span style={{ color: "var(--dim)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", maxWidth: "70%" }}>
-                    {tx.txHash}
-                  </span>
-                </div>
-              ))}
+            <div
+              className="mono"
+              style={{
+                fontSize: 11,
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              {Web3GameSimulator.getSession(sessionHash)?.txHistory.map(
+                (tx, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
+                    <span style={{ color: "var(--gray)" }}>
+                      {idx + 1}. {tx.action}
+                    </span>
+                    <span
+                      style={{
+                        color: "var(--dim)",
+                        textOverflow: "ellipsis",
+                        overflow: "hidden",
+                        whiteSpace: "nowrap",
+                        maxWidth: "70%",
+                      }}
+                    >
+                      {tx.txHash}
+                    </span>
+                  </div>
+                ),
+              )}
               {txHash && (
-                <div style={{ marginTop: 8, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+                <div
+                  style={{
+                    marginTop: 8,
+                    borderTop: "1px solid var(--line)",
+                    paddingTop: 8,
+                  }}
+                >
                   <span style={{ color: "var(--gold)" }}>Latest Tx Sign: </span>
                   <span style={{ color: "var(--text)" }}>{txHash}</span>
                 </div>
@@ -996,14 +1264,22 @@ export default function Home() {
 
         {/* Leaderboard and Match History section */}
         <div className="panel" style={{ marginTop: 14, padding: 16 }}>
-          <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              borderBottom: "1px solid var(--line)",
+              marginBottom: 12,
+            }}
+          >
             <button
               className="mono"
               style={{
                 padding: "8px 16px",
                 border: 0,
-                background: activeTab === "leaderboard" ? "var(--line)" : "transparent",
-                color: activeTab === "leaderboard" ? "var(--green)" : "var(--gray)",
+                background:
+                  activeTab === "leaderboard" ? "var(--line)" : "transparent",
+                color:
+                  activeTab === "leaderboard" ? "var(--green)" : "var(--gray)",
                 cursor: "pointer",
                 fontWeight: 700,
                 textTransform: "uppercase",
@@ -1018,7 +1294,8 @@ export default function Home() {
               style={{
                 padding: "8px 16px",
                 border: 0,
-                background: activeTab === "history" ? "var(--line)" : "transparent",
+                background:
+                  activeTab === "history" ? "var(--line)" : "transparent",
                 color: activeTab === "history" ? "var(--green)" : "var(--gray)",
                 cursor: "pointer",
                 fontWeight: 700,
@@ -1034,30 +1311,76 @@ export default function Home() {
           {activeTab === "leaderboard" && (
             <div>
               {leaderboardData.length === 0 ? (
-                <div className="mono" style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", padding: "12px 0" }}>
+                <div
+                  className="mono"
+                  style={{
+                    fontSize: 12,
+                    color: "var(--dim)",
+                    textAlign: "center",
+                    padding: "12px 0",
+                  }}
+                >
                   No ranks recorded yet. Win a shootout to be the first!
                 </div>
               ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: 12,
+                  }}
+                >
                   <thead>
-                    <tr style={{ borderBottom: "1px solid var(--line)", textAlign: "left", color: "var(--dim)" }}>
+                    <tr
+                      style={{
+                        borderBottom: "1px solid var(--line)",
+                        textAlign: "left",
+                        color: "var(--dim)",
+                      }}
+                    >
                       <th style={{ padding: "6px 4px" }}>Rank</th>
                       <th style={{ padding: "6px 4px" }}>Player</th>
                       <th style={{ padding: "6px 4px" }}>Wallet</th>
-                      <th style={{ padding: "6px 4px", textAlign: "right" }}>Wins</th>
+                      <th style={{ padding: "6px 4px", textAlign: "right" }}>
+                        Wins
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {leaderboardData.map((row: any, idx: number) => (
-                      <tr key={idx} style={{ borderBottom: "1px solid #141a1c" }}>
-                        <td style={{ padding: "8px 4px", color: idx === 0 ? "var(--gold)" : "var(--text)", fontWeight: 700 }}>
+                      <tr
+                        key={idx}
+                        style={{ borderBottom: "1px solid #141a1c" }}
+                      >
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            color: idx === 0 ? "var(--gold)" : "var(--text)",
+                            fontWeight: 700,
+                          }}
+                        >
                           #{idx + 1}
                         </td>
                         <td style={{ padding: "8px 4px" }}>{row.username}</td>
-                        <td style={{ padding: "8px 4px", color: "var(--dim)", fontFamily: "monospace" }}>
-                          {row.wallet_address ? `${row.wallet_address.slice(0, 6)}...${row.wallet_address.slice(-4)}` : "Demo Mode"}
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            color: "var(--dim)",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {row.wallet_address
+                            ? `${row.wallet_address.slice(0, 6)}...${row.wallet_address.slice(-4)}`
+                            : "Demo Mode"}
                         </td>
-                        <td style={{ padding: "8px 4px", textAlign: "right", color: "var(--green)", fontWeight: 700 }}>
+                        <td
+                          style={{
+                            padding: "8px 4px",
+                            textAlign: "right",
+                            color: "var(--green)",
+                            fontWeight: 700,
+                          }}
+                        >
                           {row.total_wins}
                         </td>
                       </tr>
@@ -1071,11 +1394,21 @@ export default function Home() {
           {activeTab === "history" && (
             <div>
               {myMatches.length === 0 ? (
-                <div className="mono" style={{ fontSize: 12, color: "var(--dim)", textAlign: "center", padding: "12px 0" }}>
+                <div
+                  className="mono"
+                  style={{
+                    fontSize: 12,
+                    color: "var(--dim)",
+                    textAlign: "center",
+                    padding: "12px 0",
+                  }}
+                >
                   You haven't played any matches yet.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 8 }}
+                >
                   {myMatches.map((match: any, idx: number) => (
                     <div
                       key={idx}
@@ -1092,7 +1425,10 @@ export default function Home() {
                       <div>
                         <span
                           style={{
-                            color: match.outcome === "win" ? "var(--green)" : "var(--red)",
+                            color:
+                              match.outcome === "win"
+                                ? "var(--green)"
+                                : "var(--red)",
                             fontWeight: 700,
                             textTransform: "uppercase",
                             marginRight: 8,
@@ -1101,7 +1437,8 @@ export default function Home() {
                           {match.outcome === "win" ? "WIN" : "LOSS"}
                         </span>
                         <span className="mono">
-                          {match.player_team} vs {match.opponent_team} ({match.player_score}-{match.opponent_score})
+                          {match.player_team} vs {match.opponent_team} (
+                          {match.player_score}-{match.opponent_score})
                         </span>
                       </div>
                       <div style={{ display: "flex", gap: 10 }}>
@@ -1121,8 +1458,17 @@ export default function Home() {
           )}
         </div>
 
-        <footer className="mono" style={{ fontSize: 10.5, color: "var(--dim)", marginTop: 16, lineHeight: 1.6 }}>
-          Polymarket odds are a snapshot from 16 Jun 2026 and will move. Entertainment and simulation, not betting advice.
+        <footer
+          className="mono"
+          style={{
+            fontSize: 10.5,
+            color: "var(--dim)",
+            marginTop: 16,
+            lineHeight: 1.6,
+          }}
+        >
+          Polymarket odds are a snapshot from 16 Jun 2026 and will move.
+          Entertainment and simulation, not betting advice.
         </footer>
       </div>
     </div>
